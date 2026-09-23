@@ -32,7 +32,7 @@ Any agent that writes files is tracked automatically.
 
 With lazy.nvim (GitHub): >lua
   {
-    "your-username/agent-lens.nvim",
+    "fulstaph/agent-lens.nvim",
     event = "VeryLazy",
     opts = { agent_name = "pi" },
     config = function(_, opts)
@@ -67,7 +67,7 @@ Local development: >lua
   Clear the timeline history.
 
 :AgentLensDiff                                            *:AgentLensDiff*
-  Open a native diff for the currently selected timeline entry.
+  Open a diff for an edit, or the current file for a read event.
 
 :AgentLensClose                                          *:AgentLensClose*
   Close all agent-lens windows (timeline + diff).
@@ -81,8 +81,7 @@ Global ~
   [a            Previous edit in timeline
 
 Timeline buffer ~
-  j / k         Navigate entries
-  <CR>          Open diff for selected entry
+  <CR>          Diff edit, or open file for read event
   q             Close timeline
   R             Refresh
 
@@ -99,6 +98,21 @@ Timeline buffer ~
   lens.close_all()       -- Close all windows
   lens.clear()           -- Clear timeline
 <
+
+Optional read tracking ~
+  Reads cannot be detected by filesystem notifications. To show successful
+  Pi/OMP `read` tool calls, opt in on BOTH sides:
+
+  1. Set `reads = { enabled = true }` in setup opts (default: false).
+  2. Launch a new Pi or OMP session with the bundled extension:
+     pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
+     omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
+
+  The extension appends path-only records to the repository Git directory at
+  agent-lens/reads.jsonl. No file contents are recorded. The Neovim consumer
+  checks for complete records every 250 ms (reads.interval_ms); it starts at
+  end-of-file and never replays historical records. Other read tools, shell
+  reads and failed reads are outside this feature. See README.md for details.
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:

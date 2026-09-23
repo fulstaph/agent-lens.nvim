@@ -4,7 +4,7 @@ Pointers for AI coding agents working in this repository.
 
 ## Overview
 
-**agent-lens.nvim** is a Neovim plugin (Lua, no compiled deps) that watches a project's filesystem for file changes and displays a live edit timeline with native Neovim diffs. It is agent-agnostic — no IPC or hooks are required.
+**agent-lens.nvim** is a Neovim plugin (Lua) tracking filesystem edits. Optional Pi/OMP read-tool events use a bundled JavaScript extension, disabled unless explicitly loaded in the agent and enabled in Neovim.
 
 ## Architecture
 
@@ -16,13 +16,19 @@ lua/agent-lens/
 ├── diff.lua        — Git diff engine: HEAD vs working tree, hunk parsing
 ├── timeline.lua    — Ordered edit feed data model (add, list, clear, summary)
 ├── panel.lua       — Timeline sidebar UI (split window, j/k nav, highlights)
-├── diff_view.lua   — Side-by-side diff viewer (diffthis on scratch buffers)
+├── diff_view.lua   — Side-by-side edit diff viewer
+├── read_events.lua — Opt-in JSONL consumer for successful Pi/OMP reads
 └── health.lua      — :checkhealth agent-lens
 plugin/
 └── agent-lens.lua  — Autoload stub
 doc/
 └── agent-lens.txt  — Vimdoc help
 ```
+
+The optional `extensions/pi-read-events.js` listens for successful `read`
+tool results and appends only relative paths to `<git-dir>/agent-lens/reads.jsonl`.
+Neovim polls complete lines after the file's current end and validates paths
+before rendering. Read entries open the current file, never a diff snapshot.
 
 ### Data flow
 
@@ -39,7 +45,7 @@ filesystem write → vim.uv.fs_event (watcher.lua)
 ### Key types
 
 - `AgentLensOpts` — full config schema (see `config.lua`)
-- `TimelineEntry` — `{id, timestamp, rel_path, status, stats, agent, diff_cached}`
+- `TimelineEntry` — `{id, timestamp, rel_path, status, kind?, stats, agent, diff_cached}`; `kind="read"` has no diff
 - `FileDiff` — `{rel_path, status, hunks[], stats, raw}`
 - `DiffHunk` — `{old_start, old_count, new_start, new_count, header, lines[]}`
 
@@ -51,7 +57,7 @@ filesystem write → vim.uv.fs_event (watcher.lua)
 - **Luacheck** linting: CI runs `luacheck lua/ plugin/` with `vim` and `jit` as globals.
 - **LuaCATS annotations** (`---@class`, `---@param`, `---@return`) on all public functions and types.
 - **Immutable patterns**: prefer creating new tables over mutating existing ones (see `timeline.add()`).
-- **No Python, no Node, no compiled code.** Pure Lua + git CLI.
+- **No compiled runtime dependency.** Lua + Git for Neovim; the optional Pi/OMP bridge uses Node-compatible JS APIs inside the agent runtime.
 
 ## Testing
 
@@ -70,16 +76,21 @@ nvim --headless -u NONE -c "set rtp+=." \
   -c "qa!"
 ```
 
-## Adding a new agent backend
+The read path has behavioral tests:
 
-agent-lens is filesystem-based — it does not need per-agent backends. If future work adds agent-specific features (e.g., inferring which agent wrote a file), add a module at `lua/agent-lens/agents/<name>.lua` that exports a detection function:
-
-```lua
---- Detect if this agent is running and identify its edits.
----@param rel_path string
----@return string|nil agent_name
-function M.detect(rel_path) end
+```bash
+nvim --headless -u NONE -l tests/read_events.lua
+node tests/pi-read-events.test.mjs
 ```
+
+## Adding an agent read source
+
+Filesystem edits stay agent-agnostic. For read events, mirror the Pi extension:
+emit one newline-delimited JSON object with `v: 1`, `kind: "read"`, a
+repository-relative `path`, and an `agent` label to the active Git directory's
+`agent-lens/reads.jsonl`. Never include file contents or secrets. Only emit
+successful reads, validate the repository boundary at the source, and keep the
+Neovim consumer's validation in place.
 
 ## File conventions
 

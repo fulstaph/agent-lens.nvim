@@ -99,3 +99,9 @@ jobs:
             -c "cd /tmp/lens-test" \
             -c "lua local d = require('agent-lens.diff'); local root = d.git_root(); assert(root, 'no git root'); local fd = d.file_diff(root, 'test.txt'); assert(fd, 'no diff'); assert(fd.stats.added >= 1, 'added lines'); assert(#fd.hunks >= 1, 'hunks'); print('OK: diff engine')" \
             -c "qa!"
+
+      - name: Optional read feed and navigation
+        run: nvim --headless -u NONE -l tests/read_events.lua
+
+      - name: Pi extension emits metadata only
+        run: node tests/pi-read-events.test.mjs

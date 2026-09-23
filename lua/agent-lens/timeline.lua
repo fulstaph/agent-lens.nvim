@@ -1,5 +1,4 @@
---- Edit timeline data model.
---- Tracks file edits as they happen and maintains an ordered timeline.
+--- Filesystem edits and optional agent-reported reads in arrival order.
 
 local config = require("agent-lens.config")
 
@@ -9,7 +8,8 @@ local M = {}
 ---@field id integer Unique entry ID
 ---@field timestamp integer Unix timestamp
 ---@field rel_path string Relative file path
----@field status "modified"|"added"|"deleted"|"renamed" File status
+---@field status "modified"|"added"|"deleted"|"renamed"|"read" File status
+---@field kind? "read" Read entries do not have a diff
 ---@field stats {added: integer, removed: integer} Line counts
 ---@field agent string Agent name that made the edit
 ---@field diff_cached? table Cached FileDiff for this entry
@@ -24,13 +24,14 @@ M._next_id = 1
 M._path_index = {}
 
 --- Add a new entry to the timeline.
----@param entry_data {rel_path: string, status: string, stats: table, agent?: string, diff?: table}
+---@param entry_data {rel_path: string, status: string, kind?: string, stats: table, agent?: string, diff?: table}
 ---@return TimelineEntry
 function M.add(entry_data)
   local entry = {
     id = M._next_id,
     timestamp = os.time(),
     rel_path = entry_data.rel_path,
+    kind = entry_data.kind,
     status = entry_data.status,
     stats = entry_data.stats or { added = 0, removed = 0 },
     agent = entry_data.agent or config.options.agent_name,

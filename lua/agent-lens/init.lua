@@ -16,6 +16,7 @@ local diff_engine = require("agent-lens.diff")
 local timeline = require("agent-lens.timeline")
 local panel = require("agent-lens.panel")
 local diff_view = require("agent-lens.diff_view")
+local read_events = require("agent-lens.read_events")
 
 local M = {}
 
@@ -108,6 +109,9 @@ function M.start(root)
   M._root = root
 
   watcher.start(root, on_file_change)
+  if config.options.reads.enabled then
+    read_events.start(root)
+  end
   vim.notify(
     string.format("[agent-lens] Watching %s", vim.fn.fnamemodify(root, ":~")),
     vim.log.levels.INFO
@@ -117,6 +121,7 @@ end
 --- Stop watching.
 function M.stop()
   watcher.stop()
+  read_events.stop()
   M._root = nil
   vim.notify("[agent-lens] Stopped watching", vim.log.levels.INFO)
 end
@@ -132,11 +137,29 @@ end
 --- Open diff for the currently selected timeline entry.
 function M.show_diff()
   local entry = panel.selected()
-  if entry then
-    diff_view.open(entry)
-  else
+  if not entry then
     vim.notify("[agent-lens] No entry selected", vim.log.levels.INFO)
+    return
   end
+  if entry.kind == "read" then
+    local root = M._root or read_events.root()
+    local uv = vim.uv or vim.loop
+    local real_root = root and uv.fs_realpath(root)
+    local file = root and uv.fs_realpath(root .. "/" .. entry.rel_path)
+    if not real_root or not file or file:sub(1, #real_root + 1) ~= real_root .. "/" then
+      vim.notify("[agent-lens] Read target is no longer inside the project", vim.log.levels.WARN)
+      return
+    end
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if win ~= panel._win then
+        vim.api.nvim_set_current_win(win)
+        break
+      end
+    end
+    vim.cmd("edit " .. vim.fn.fnameescape(file))
+    return
+  end
+  diff_view.open(entry)
 end
 
 --- Close all agent-lens windows.

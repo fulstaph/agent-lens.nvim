@@ -12,9 +12,9 @@
 
 ---
 
-Run any AI coding agent (Pi, Claude Code, Codex, Copilot CLI, OpenCode, …) in a terminal while **agent-lens** tracks every file edit in a live timeline inside Neovim. Select any entry to open a native side-by-side diff — full syntax highlighting, your colorscheme, your keymaps.
+Run a coding agent beside Neovim: agent-lens shows filesystem edits in a live timeline and opens native diffs against Git `HEAD`. Pi/OMP reads can also appear as separate, opt-in tool events.
 
-**Agent-agnostic.** No hooks or agent-side config needed. The plugin watches the filesystem via libuv and diffs against `git HEAD`. Any process that writes files is tracked automatically.
+Filesystem edits need no agent integration. Reads cannot be observed through filesystem notifications: the optional Pi extension reports successful `read` tool calls only, without file contents. Neither channel identifies which process made a filesystem edit.
 
 ## Features
 
@@ -65,9 +65,9 @@ Run any AI coding agent (Pi, Claude Code, Codex, Copilot CLI, OpenCode, …) in 
 
 1. Open your project in Neovim.
 2. The watcher starts automatically if you're in a git repo.
-3. Run your AI agent in another terminal — edits appear in the timeline as they land.
+3. Run your agent in another terminal — writes appear in the timeline as they land.
 4. Press `<leader>al` to toggle the timeline panel.
-5. Navigate with `j`/`k`, press `<CR>` to open a side-by-side diff.
+5. Navigate with `j`/`k`; `<CR>` opens a diff for an edit or the current file for a read.
 
 ## Commands
 
@@ -116,6 +116,10 @@ require("agent-lens").setup({
   diff_layout = "vertical",     -- "vertical" or "horizontal"
   auto_open_diff = false,        -- Auto-open diff on each new edit
   agent_name = "agent",          -- Display name for the agent
+  reads = {
+    enabled = false,            -- Opt in to Pi/OMP read-tool events
+    interval_ms = 250,          -- Read the local event log every 250 ms
+  },
 
   keymaps = {
     toggle = "<leader>al",
@@ -163,31 +167,25 @@ require("agent-lens").setup({
 
 ## Agent setup guides
 
-agent-lens is fully agent-agnostic — it watches the filesystem, not any specific agent's IPC.
-Every guide below boils down to: **run the agent in a separate terminal on the same repo, and agent-lens picks up every file write automatically.**
+Filesystem edits from any process appear without hooks. Read events require an explicitly loaded Pi/OMP extension and `reads.enabled = true` in Neovim.
 
-### Pi agent (Oh My Pi)
+### Pi agent / Oh My Pi (OMP)
 
-[Pi agent](https://docs.oh-my-pi.dev) edits files directly on disk via its `edit` and `write` tools. No hooks or extra config needed — agent-lens sees every write the moment it lands.
+Run Pi or OMP in another terminal in the same Git repository; edits appear without hooks. For reads, opt in on both sides:
 
-**Recommended workflow:**
-
-1. Open your project in Neovim with agent-lens installed.
-2. In a second terminal (or a Zellij/tmux pane), start Pi:
-   ```bash
-   omp   # or: pi
+1. In your LazyVim plugin spec, opt in and restart Neovim:
+   ```lua
+   opts = { agent_name = "pi", reads = { enabled = true } }
    ```
-3. Press `<leader>al` in Neovim to open the timeline.
-4. Ask Pi to make changes — they appear in the timeline in real-time.
-5. Press `<CR>` on any entry to review the diff.
+2. Find the plugin install path in `:Lazy` (typically `~/.local/share/nvim/lazy/agent-lens.nvim`). Start a **new** Pi or OMP session in the same Git repository with the bundled extension:
+   ```bash
+   pi --extension ~/.local/share/nvim/lazy/agent-lens.nvim/extensions/pi-read-events.js
+   # or:
+   omp --extension ~/.local/share/nvim/lazy/agent-lens.nvim/extensions/pi-read-events.js
+   ```
+3. Ask Pi or OMP to use its built-in `read` tool on a project file (OMP's `:50-100` and `:raw:50-100` selectors work too). The timeline shows `READ · pi`; press `<CR>` to open the current file. Edits still show Git `HEAD` diffs.
 
-**Tip:** Set `agent_name = "pi"` in your config so timeline entries are labeled clearly:
-
-```lua
-opts = { agent_name = "pi" }
-```
-
-If you use Pi's subagents (scout, task, etc.), all of their edits funnel through the same filesystem and are tracked identically.
+The extension writes **only relative path metadata**, not file contents or tool output, to `<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`). The Neovim feed starts at the log's current end; it never replays previous sessions. A read outside the repository, a failed read, and reads via shell commands, `eval`, or external tools are **not captured**. Remove `--extension` to stop producing events; `reads.enabled = false` only stops Neovim from consuming them. Delete the JSONL file when you no longer need its local path history.
 
 ### Claude Code
 

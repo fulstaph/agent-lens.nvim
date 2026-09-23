@@ -38,14 +38,7 @@ end
 ---@return string[] lines
 ---@return table[] highlights {line, col_start, col_end, group}
 local function render_entry(entry)
-  local icon
-  if entry.status == "added" then
-    icon = " "
-  elseif entry.status == "deleted" then
-    icon = " "
-  else
-    icon = " "
-  end
+  local icon = entry.kind == "read" and "R " or "  "
 
   local stats = ""
   if entry.stats.added > 0 then
@@ -58,6 +51,9 @@ local function render_entry(entry)
     stats = stats .. "-" .. entry.stats.removed
   end
 
+  if entry.kind == "read" then
+    stats = "READ · " .. entry.agent
+  end
   local time_str = relative_time(entry.timestamp)
 
   -- Shorten the path if too long
@@ -138,15 +134,16 @@ function M.render()
 
   -- Header
   local summary = timeline.summary()
-  local header = string.format("  Agent Lens  %d edits · %d files", summary.total, summary.files)
+  local header = string.format("  Agent Lens  %d events · %d files", summary.total, summary.files)
   lines[#lines + 1] = header
   lines[#lines + 1] = string.rep("─", config.options.timeline_width)
 
   if #entries == 0 then
     lines[#lines + 1] = ""
-    lines[#lines + 1] = "  Watching for edits…"
+    lines[#lines + 1] = "  Watching for file edits…"
     lines[#lines + 1] = ""
-    lines[#lines + 1] = "  No changes detected yet."
+    lines[#lines + 1] = config.options.reads.enabled and "  Waiting for Pi/OMP read events."
+      or "  No edits detected yet."
   else
     for i, entry in ipairs(entries) do
       local entry_lines, entry_hls = render_entry(entry)
@@ -330,11 +327,8 @@ function M._setup_keymaps()
   end, vim.tbl_extend("force", opts, { desc = "Previous edit" }))
 
   vim.keymap.set("n", config.options.keymaps.open_diff, function()
-    local entry = M.selected()
-    if entry then
-      require("agent-lens.diff_view").open(entry)
-    end
-  end, vim.tbl_extend("force", opts, { desc = "Open diff" }))
+    require("agent-lens").show_diff()
+  end, vim.tbl_extend("force", opts, { desc = "Open edit diff or read file" }))
 
   vim.keymap.set("n", config.options.keymaps.refresh, function()
     M.render()

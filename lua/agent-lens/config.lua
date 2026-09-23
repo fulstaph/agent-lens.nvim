@@ -36,6 +36,7 @@
 ---@field keymaps? AgentLensKeymaps
 ---@field filter? AgentLensFilter
 ---@field agent_name? string Display name for the agent
+---@field reads? { enabled?: boolean, interval_ms?: integer } Opt-in Pi/OMP read feed
 
 local M = {}
 
@@ -51,6 +52,7 @@ M.defaults = {
   timeline_height = 15,
   diff_layout = "vertical",
   auto_open_diff = false,
+  reads = { enabled = false, interval_ms = 250 },
   highlights = {
     added = "DiffAdd",
     removed = "DiffDelete",

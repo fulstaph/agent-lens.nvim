@@ -22,18 +22,22 @@ local uv = vim.uv or vim.loop
 ---@param patterns string[] Glob patterns
 ---@return boolean
 local function is_ignored(path, patterns)
+  local basename = path:match("[^/]+$") or path
   for _, pat in ipairs(patterns) do
-    -- Convert glob to a lua pattern (simplified but covers the common cases)
-    local lua_pat =
-      pat:gsub("%.", "%%."):gsub("%*%*/", "(.+/)?"):gsub("%*", "[^/]*"):gsub("%?", "[^/]")
-    lua_pat = "^" .. lua_pat .. "$"
-    if path:match(lua_pat) then
-      return true
-    end
-    -- Also match just the filename against simple patterns like "*.swp"
-    local basename = path:match("[^/]+$") or path
-    if basename:match(lua_pat) then
-      return true
+    if pat:sub(-3) == "/**" then
+      local dir = pat:sub(1, -4)
+      if
+        path == dir
+        or path:sub(1, #dir + 1) == dir .. "/"
+        or path:find("/" .. dir .. "/", 1, true)
+      then
+        return true
+      end
+    else
+      local lua_pat = "^" .. pat:gsub("%.", "%%."):gsub("%*", "[^/]*"):gsub("%?", "[^/]") .. "$"
+      if path:match(lua_pat) or basename:match(lua_pat) then
+        return true
+      end
     end
   end
   return false
