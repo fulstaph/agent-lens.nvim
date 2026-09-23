@@ -8,6 +8,7 @@
 ---   :AgentLensStart   — Start watching
 ---   :AgentLensStop    — Stop watching
 ---   :AgentLensClear   — Clear the timeline
+---   :AgentLensInlineToggle — Toggle read/write marks in source buffers
 ---   :AgentLensDiff    — Open diff for selected entry
 
 local config = require("agent-lens.config")
@@ -17,6 +18,7 @@ local timeline = require("agent-lens.timeline")
 local panel = require("agent-lens.panel")
 local diff_view = require("agent-lens.diff_view")
 local read_events = require("agent-lens.read_events")
+local inline = require("agent-lens.inline")
 
 local M = {}
 
@@ -81,7 +83,9 @@ local function on_file_change(rel_path, events)
       diff = file_diff,
     })
   else
-    -- No diff — file matches HEAD, skip
+    -- Reverted to HEAD; remove the previous write decoration.
+    vim.cmd("silent! checktime")
+    inline.record_write(M._root, rel_path, nil)
     return
   end
 
@@ -100,6 +104,7 @@ local function on_file_change(rel_path, events)
 
   -- Also trigger checktime so open buffers reload
   vim.cmd("silent! checktime")
+  inline.record_write(M._root, rel_path, not events.deleted and file_diff or nil)
 end
 
 --- Start watching the project for file changes.
@@ -157,6 +162,10 @@ function M.show_diff()
       end
     end
     vim.cmd("edit " .. vim.fn.fnameescape(file))
+    if entry.range then
+      local line = math.min(entry.range.start, vim.api.nvim_buf_line_count(0))
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+    end
     return
   end
   diff_view.open(entry)
@@ -171,6 +180,7 @@ end
 --- Clear the timeline.
 function M.clear()
   timeline.clear()
+  inline.clear()
   if panel.is_open() then
     panel.render()
   end
@@ -181,6 +191,7 @@ end
 ---@param opts? AgentLensOpts
 function M.setup(opts)
   config.setup(opts)
+  inline.setup(config.options.inline)
 
   -- Register user commands
   vim.api.nvim_create_user_command("AgentLens", function()
@@ -202,6 +213,13 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("AgentLensDiff", function()
     M.show_diff()
   end, { desc = "Open diff for selected entry" })
+  vim.api.nvim_create_user_command("AgentLensInlineToggle", function()
+    local visible = inline.toggle()
+    vim.notify(
+      "[agent-lens] Inline activity " .. (visible and "shown" or "hidden"),
+      vim.log.levels.INFO
+    )
+  end, { desc = "Toggle agent-lens activity in file buffers" })
 
   vim.api.nvim_create_user_command("AgentLensClose", function()
     M.close_all()

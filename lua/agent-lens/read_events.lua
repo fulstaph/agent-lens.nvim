@@ -1,6 +1,7 @@
 --- Optional Pi/OMP read events. Reads only metadata appended inside the active Git dir.
 local config = require("agent-lens.config")
 local timeline = require("agent-lens.timeline")
+local inline = require("agent-lens.inline")
 
 local M = {}
 local uv = vim.uv or vim.loop
@@ -53,13 +54,27 @@ local function deliver(line)
       and event.agent:match("^[%w_%-]+$")
       and event.agent:sub(1, 32)
     or config.options.agent_name
+  local range = event.range
+  if
+    type(range) ~= "table"
+    or type(range.start) ~= "number"
+    or type(range["end"]) ~= "number"
+    or range.start % 1 ~= 0
+    or range["end"] % 1 ~= 0
+    or range.start < 1
+    or range["end"] < range.start
+  then
+    range = nil
+  end
   timeline.add({
     rel_path = event.path,
     kind = "read",
     status = "read",
     stats = { added = 0, removed = 0 },
     agent = agent,
+    range = range,
   })
+  inline.record_read(root, event.path, range, agent)
   local panel = require("agent-lens.panel")
   if panel.is_open() then
     panel.render()

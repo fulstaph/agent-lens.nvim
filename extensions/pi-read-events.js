@@ -14,12 +14,21 @@ function resolveReadFile(cwd, input) {
     const expanded = name.startsWith("~/") ? resolve(homedir(), name.slice(2)) : resolve(cwd, name);
     try {
       const file = realpathSync(expanded);
-      if (statSync(file).isFile()) return file;
+      if (statSync(file).isFile()) return { file, selector: name === input ? undefined : input.slice(candidate.length) };
     } catch {
       // Try the selector-stripped candidate.
     }
   }
   return undefined;
+}
+
+function readRange(selector, input) {
+  const span = selector?.match(/^:(?:raw:)?(\d+)-(\d+)(?::raw)?$/);
+  const count = selector?.match(/^:(?:raw:)?(\d+)\+(\d+)(?::raw)?$/);
+  const start = span ? Number(span[1]) : count ? Number(count[1]) : input.offset;
+  const end = span ? Number(span[2]) : count ? start + Number(count[2]) - 1 : start + input.limit - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) return undefined;
+  return { start, end };
 }
 
 export default function (pi) {
@@ -42,11 +51,13 @@ export default function (pi) {
 
   pi.on("tool_result", (event, ctx) => {
     if (event.toolName !== "read" || event.isError || !root || !log || typeof event.input?.path !== "string") return;
+    let range;
     let path;
     try {
-      const file = resolveReadFile(ctx.cwd, event.input.path);
-      if (!file) return;
-      path = relative(root, file);
+      const resolved = resolveReadFile(ctx.cwd, event.input.path);
+      if (!resolved) return;
+      path = relative(root, resolved.file);
+      range = readRange(resolved.selector, event.input);
       if (!path || path === ".." || path.startsWith(".." + sep) || isAbsolute(path) || path === ".git" || path.startsWith(".git" + sep)) return;
     } catch {
       // Removed/unreadable files do not affect the agent's read result.
@@ -54,7 +65,7 @@ export default function (pi) {
     }
     try {
       mkdirSync(dirname(log), { recursive: true, mode: 0o700 });
-      appendFileSync(log, JSON.stringify({ v: 1, kind: "read", path, agent: "pi" }) + "\n", { mode: 0o600 });
+      appendFileSync(log, JSON.stringify({ v: 1, kind: "read", path, agent: "pi", ...(range && { range }) }) + "\n", { mode: 0o600 });
     } catch (error) {
       if (!warned) {
         warned = true;

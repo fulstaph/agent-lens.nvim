@@ -4,7 +4,7 @@ Pointers for AI coding agents working in this repository.
 
 ## Overview
 
-**agent-lens.nvim** is a Neovim plugin (Lua) tracking filesystem edits. Optional Pi/OMP read-tool events use a bundled JavaScript extension, disabled unless explicitly loaded in the agent and enabled in Neovim.
+**agent-lens.nvim** is a Neovim plugin (Lua) tracking filesystem edits and showing Git `HEAD`-to-disk changed lines inside file buffers. Optional Pi/OMP read-tool events use a bundled JavaScript extension, disabled unless explicitly loaded in the agent and enabled in Neovim.
 
 ## Architecture
 
@@ -18,6 +18,7 @@ lua/agent-lens/
 ├── panel.lua       — Timeline sidebar UI (split window, j/k nav, highlights)
 ├── diff_view.lua   — Side-by-side edit diff viewer
 ├── read_events.lua — Opt-in JSONL consumer for successful Pi/OMP reads
+├── inline.lua      — Read-range/write-line extmarks in ordinary file buffers
 └── health.lua      — :checkhealth agent-lens
 plugin/
 └── agent-lens.lua  — Autoload stub
@@ -26,9 +27,10 @@ doc/
 ```
 
 The optional `extensions/pi-read-events.js` listens for successful `read`
-tool results and appends only relative paths to `<git-dir>/agent-lens/reads.jsonl`.
-Neovim polls complete lines after the file's current end and validates paths
-before rendering. Read entries open the current file, never a diff snapshot.
+tool results and appends relative paths and optional requested line ranges to
+`<git-dir>/agent-lens/reads.jsonl`. Neovim polls complete records and validates
+paths before rendering. Read entries open the current file at the requested
+start line when known; unknown ranges get a file-level label.
 
 ### Data flow
 
@@ -37,15 +39,18 @@ filesystem write → vim.uv.fs_event (watcher.lua)
   → debounce (configurable ms)
   → ignore filter (glob patterns)
   → git diff HEAD -- <file> (diff.lua)
-  → timeline.add() (timeline.lua)
-  → panel.render() (panel.lua)
+  → timeline.add() + panel.render()
+  → checktime → inline.record_write() (inline.lua)
   → user selects entry → diff_view.open() (diff_view.lua)
+
+Pi/OMP read → successful built-in read tool result → metadata-only JSONL
+  → read_events.poll() → timeline.add() + inline.record_read()
 ```
 
 ### Key types
 
 - `AgentLensOpts` — full config schema (see `config.lua`)
-- `TimelineEntry` — `{id, timestamp, rel_path, status, kind?, stats, agent, diff_cached}`; `kind="read"` has no diff
+- `TimelineEntry` — `{id, timestamp, rel_path, status, kind?, stats, agent, range?, diff_cached}`; `kind="read"` has no diff
 - `FileDiff` — `{rel_path, status, hunks[], stats, raw}`
 - `DiffHunk` — `{old_start, old_count, new_start, new_count, header, lines[]}`
 
@@ -72,14 +77,15 @@ nvim --headless -u NONE -c "set rtp+=." \
 # Verify all commands register
 nvim --headless -u NONE -c "set rtp+=." \
   -c "lua require('agent-lens').setup({ enabled = false })" \
-  -c "lua local cmds = vim.api.nvim_get_commands({}); for _, n in ipairs({'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensStart','AgentLensStop'}) do assert(cmds[n], n) end; print('OK')" \
+  -c "lua local cmds = vim.api.nvim_get_commands({}); for _, n in ipairs({'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensInlineToggle','AgentLensStart','AgentLensStop'}) do assert(cmds[n], n) end; print('OK')" \
   -c "qa!"
 ```
 
-The read path has behavioral tests:
+The read path and in-buffer overlays have behavioral tests:
 
 ```bash
 nvim --headless -u NONE -l tests/read_events.lua
+nvim --headless -u NONE -l tests/inline.lua
 node tests/pi-read-events.test.mjs
 ```
 
@@ -87,7 +93,8 @@ node tests/pi-read-events.test.mjs
 
 Filesystem edits stay agent-agnostic. For read events, mirror the Pi extension:
 emit one newline-delimited JSON object with `v: 1`, `kind: "read"`, a
-repository-relative `path`, and an `agent` label to the active Git directory's
+repository-relative `path`, an `agent` label, and optionally a validated
+`range: { start, end }` of requested 1-based lines to the active Git directory's
 `agent-lens/reads.jsonl`. Never include file contents or secrets. Only emit
 successful reads, validate the repository boundary at the source, and keep the
 Neovim consumer's validation in place.

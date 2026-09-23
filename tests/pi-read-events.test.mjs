@@ -8,6 +8,7 @@ const root = mkdtempSync(join(tmpdir(), "agent-lens-pi-"));
 try {
   execFileSync("git", ["init", "-q", root]);
   writeFileSync(join(root, "sample.lua"), "hello\n");
+  writeFileSync(join(root, "sample.lua:2-3"), "literal filename\n");
   const source = readFileSync(new URL("../extensions/pi-read-events.js", import.meta.url), "utf8");
   const { default: extension } = await import(`data:text/javascript,${encodeURIComponent(source)}`);
   const handlers = new Map();
@@ -18,6 +19,8 @@ try {
   handlers.get("session_start")({}, ctx);
   handlers.get("tool_result")({ toolName: "read", isError: false, input: { path: "sample.lua" }, content: [{ type: "text", text: "SECRET" }] }, ctx);
   handlers.get("tool_result")({ toolName: "read", isError: false, input: { path: "sample.lua:raw:1-1" } }, ctx);
+  handlers.get("tool_result")({ toolName: "read", isError: false, input: { path: "sample.lua", offset: 2, limit: 3 } }, ctx);
+  handlers.get("tool_result")({ toolName: "read", isError: false, input: { path: "sample.lua:2-3" } }, ctx);
   handlers.get("tool_result")({ toolName: "read", isError: true, input: { path: "sample.lua" } }, ctx);
   handlers.get("tool_result")({ toolName: "bash", isError: false, input: { path: "sample.lua" } }, ctx);
   handlers.get("tool_result")({ toolName: "read", isError: false, input: { path: ".git/config" } }, ctx);
@@ -29,7 +32,9 @@ try {
   const events = contents.trim().split("\n").map(JSON.parse);
   assert.deepEqual(events, [
     { v: 1, kind: "read", path: "sample.lua", agent: "pi" },
-    { v: 1, kind: "read", path: "sample.lua", agent: "pi" },
+    { v: 1, kind: "read", path: "sample.lua", agent: "pi", range: { start: 1, end: 1 } },
+    { v: 1, kind: "read", path: "sample.lua", agent: "pi", range: { start: 2, end: 4 } },
+    { v: 1, kind: "read", path: "sample.lua:2-3", agent: "pi" },
   ]);
   console.log("Pi read hook OK");
 } finally {

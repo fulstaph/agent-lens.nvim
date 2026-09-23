@@ -12,7 +12,7 @@
 
 ---
 
-Run a coding agent beside Neovim: agent-lens shows filesystem edits in a live timeline and opens native diffs against Git `HEAD`. Pi/OMP reads can also appear as separate, opt-in tool events.
+Run a coding agent beside Neovim: agent-lens shows filesystem edits in a live timeline and highlights changed lines in ordinary file buffers. It opens native diffs against Git `HEAD`. Opt-in Pi/OMP reads can highlight requested lines in the buffer too.
 
 Filesystem edits need no agent integration. Reads cannot be observed through filesystem notifications: the optional Pi extension reports successful `read` tool calls only, without file contents. Neither channel identifies which process made a filesystem edit.
 
@@ -20,6 +20,7 @@ Filesystem edits need no agent integration. Reads cannot be observed through fil
 
 - **Live edit timeline** — chronological feed of every file change with `+N / -M` stats
 - **Native Neovim diffs** — `diffthis` side-by-side (HEAD vs working tree) with full Tree-sitter highlighting
+- **In-buffer activity** — recent read ranges and Git `HEAD`-to-disk changed lines are marked without opening the timeline; use `:AgentLensInlineToggle` to hide/show them
 - **Zero agent coupling** — works with Pi, Claude Code, Codex CLI, Copilot CLI, OpenCode, Aider, or a human in another terminal
 - **Fast** — macOS uses native FSEvents recursive watching; Linux uses per-directory `inotify` via libuv; all events debounced
 - **Configurable** — panel position, diff layout, ignore patterns, keymaps, highlight groups
@@ -65,9 +66,11 @@ Filesystem edits need no agent integration. Reads cannot be observed through fil
 
 1. Open your project in Neovim.
 2. The watcher starts automatically if you're in a git repo.
-3. Run your agent in another terminal — writes appear in the timeline as they land.
-4. Press `<leader>al` to toggle the timeline panel.
-5. Navigate with `j`/`k`; `<CR>` opens a diff for an edit or the current file for a read.
+3. Run your agent in another terminal — writes appear in the timeline and changed lines are highlighted in open file buffers.
+4. Press `<leader>al` to toggle the timeline panel; the in-buffer marks do not require the panel.
+5. Navigate with `j`/`k`; `<CR>` opens a diff for an edit or the current file at the reported line for a read.
+
+In-file write highlights show the current **Git `HEAD` → disk** added/modified lines, not proof that the agent authored those lines. Pure deletions get a nearby `− deleted` label. Read highlights show the **last requested range** when the tool supplies one; a read without a known range gets a file-level label instead. Marks are hidden while a buffer has unsaved local edits, and `:AgentLensClear` removes them.
 
 ## Commands
 
@@ -77,7 +80,8 @@ Filesystem edits need no agent integration. Reads cannot be observed through fil
 | `:AgentLensStart [dir]` | Start the file watcher |
 | `:AgentLensStop` | Stop the file watcher |
 | `:AgentLensDiff` | Open diff for the selected timeline entry |
-| `:AgentLensClear` | Clear the timeline |
+| `:AgentLensClear` | Clear the timeline and in-buffer activity |
+| `:AgentLensInlineToggle` | Hide/show read and write marks in file buffers |
 | `:AgentLensClose` | Close all agent-lens windows |
 
 ## Keymaps
@@ -119,6 +123,9 @@ require("agent-lens").setup({
   reads = {
     enabled = false,            -- Opt in to Pi/OMP read-tool events
     interval_ms = 250,          -- Read the local event log every 250 ms
+  },
+  inline = {
+    enabled = true,             -- Show latest activity in source buffers
   },
 
   keymaps = {
@@ -183,9 +190,9 @@ Run Pi or OMP in another terminal in the same Git repository; edits appear witho
    # or:
    omp --extension ~/.local/share/nvim/lazy/agent-lens.nvim/extensions/pi-read-events.js
    ```
-3. Ask Pi or OMP to use its built-in `read` tool on a project file (OMP's `:50-100` and `:raw:50-100` selectors work too). The timeline shows `READ · pi`; press `<CR>` to open the current file. Edits still show Git `HEAD` diffs.
+3. Ask Pi or OMP to use its built-in `read` tool on a project file (OMP's `:50-100` and `:raw:50-100` selectors work too). The timeline shows `READ · pi`; `<CR>` opens the current file at the reported first line when available. The source buffer highlights a known requested range; otherwise it shows a file-level `READ · pi` label. Edits still show Git `HEAD` diffs.
 
-The extension writes **only relative path metadata**, not file contents or tool output, to `<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`). The Neovim feed starts at the log's current end; it never replays previous sessions. A read outside the repository, a failed read, and reads via shell commands, `eval`, or external tools are **not captured**. Remove `--extension` to stop producing events; `reads.enabled = false` only stops Neovim from consuming them. Delete the JSONL file when you no longer need its local path history.
+The extension writes **only relative path and optional requested line-range metadata**, not file contents or tool output, to `<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`). Neovim starts at the log's current end; it never replays previous sessions. A read outside the repository, a failed read, and reads via shell commands, `eval`, or external tools are **not captured**. Remove `--extension` to stop producing events; `reads.enabled = false` only stops Neovim from consuming them. Delete the JSONL file when you no longer need its local path history.
 
 ### Claude Code
 

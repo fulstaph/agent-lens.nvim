@@ -37,6 +37,7 @@
 ---@field filter? AgentLensFilter
 ---@field agent_name? string Display name for the agent
 ---@field reads? { enabled?: boolean, interval_ms?: integer } Opt-in Pi/OMP read feed
+---@field inline? { enabled?: boolean } Show recent activity in file buffers
 
 local M = {}
 
@@ -53,6 +54,7 @@ M.defaults = {
   diff_layout = "vertical",
   auto_open_diff = false,
   reads = { enabled = false, interval_ms = 250 },
+  inline = { enabled = true },
   highlights = {
     added = "DiffAdd",
     removed = "DiffDelete",

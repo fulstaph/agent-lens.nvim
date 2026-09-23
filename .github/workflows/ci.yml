@@ -60,7 +60,7 @@ jobs:
           nvim --headless -u NONE \
             -c "set rtp+=." \
             -c "lua require('agent-lens').setup({ enabled = false })" \
-            -c "lua local cmds = vim.api.nvim_get_commands({}); local expected = {'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensStart','AgentLensStop'}; for _, name in ipairs(expected) do if not cmds[name] then print('MISSING: ' .. name); vim.cmd('cq') end end; print('OK: all commands registered')" \
+            -c "lua local cmds = vim.api.nvim_get_commands({}); local expected = {'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensInlineToggle','AgentLensStart','AgentLensStop'}; for _, name in ipairs(expected) do if not cmds[name] then print('MISSING: ' .. name); vim.cmd('cq') end end; print('OK: all commands registered')" \
             -c "qa!"
 
       - name: Config merges correctly
@@ -102,6 +102,9 @@ jobs:
 
       - name: Optional read feed and navigation
         run: nvim --headless -u NONE -l tests/read_events.lua
+
+      - name: Inline read and write activity
+        run: nvim --headless -u NONE -l tests/inline.lua
 
       - name: Pi extension emits metadata only
         run: node tests/pi-read-events.test.mjs

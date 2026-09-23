@@ -14,8 +14,8 @@ CONTENTS                                              *agent-lens-contents*
 1. INTRODUCTION                                          *agent-lens-intro*
 
 agent-lens.nvim watches your project for file changes made by AI coding
-agents (Pi, Claude Code, Codex, etc.) and shows an interactive timeline of
-edits with native Neovim diffs.
+agents (Pi, Claude Code, Codex, etc.), highlights activity in file buffers,
+and shows an interactive timeline of edits with native Neovim diffs.
 
 Agent-agnostic: watches the filesystem via libuv and diffs against git HEAD.
 Any agent that writes files is tracked automatically.
@@ -64,10 +64,14 @@ Local development: >lua
   Stop the file watcher.
 
 :AgentLensClear                                          *:AgentLensClear*
-  Clear the timeline history.
+  Clear the timeline history and in-buffer activity marks.
+
+:AgentLensInlineToggle                            *:AgentLensInlineToggle*
+  Hide or show read/write marks in ordinary file buffers.
 
 :AgentLensDiff                                            *:AgentLensDiff*
-  Open a diff for an edit, or the current file for a read event.
+  Open a diff for an edit, or the current file at the requested start line
+  for a read event with a known range.
 
 :AgentLensClose                                          *:AgentLensClose*
   Close all agent-lens windows (timeline + diff).
@@ -108,11 +112,19 @@ Optional read tracking ~
      pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
      omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
 
-  The extension appends path-only records to the repository Git directory at
-  agent-lens/reads.jsonl. No file contents are recorded. The Neovim consumer
-  checks for complete records every 250 ms (reads.interval_ms); it starts at
-  end-of-file and never replays historical records. Other read tools, shell
-  reads and failed reads are outside this feature. See README.md for details.
+  The extension appends relative paths and optional requested line ranges to
+  the repository Git directory at agent-lens/reads.jsonl. No file contents
+  are recorded. The consumer polls every 250 ms (reads.interval_ms), starting
+  at end-of-file without replaying historical events. Other read tools, shell
+  reads, and failed reads are outside this feature. See README.md for details.
+
+In-buffer activity ~
+  Enabled by default (`inline = { enabled = true }`). Writes highlight the
+  current Git HEAD-to-disk changed lines, not an attribution to the agent.
+  Pure deletions get a nearby virtual-text label. Known read-tool ranges
+  highlight those requested lines; unknown ranges show a file-level label.
+  Buffer-local unsaved changes temporarily hide marks. Use
+  :AgentLensInlineToggle to hide/show them or :AgentLensClear to remove them.
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:
