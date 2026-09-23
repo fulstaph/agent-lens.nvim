@@ -13,12 +13,14 @@ CONTENTS                                              *agent-lens-contents*
 ==============================================================================
 1. INTRODUCTION                                          *agent-lens-intro*
 
-agent-lens.nvim watches your project for file changes made by AI coding
-agents (Pi, Claude Code, Codex, etc.), highlights activity in file buffers,
-and shows an interactive timeline of edits with native Neovim diffs.
+agent-lens.nvim watches projects for file changes, highlights activity in file
+buffers, and shows an interactive timeline with native Neovim diffs. With the
+optional Pi/OMP bridge it can also follow the agent's current read, edit, or
+write location across files.
 
-Agent-agnostic: watches the filesystem via libuv and diffs against git HEAD.
-Any agent that writes files is tracked automatically.
+Filesystem watching is agent-agnostic. Follow Agent uses correlated,
+metadata-only Pi/OMP tool events because exact locations cannot be inferred
+from filesystem notifications.
 
 ==============================================================================
 2. REQUIREMENTS                                   *agent-lens-requirements*
@@ -64,10 +66,14 @@ Local development: >lua
   Stop the file watcher.
 
 :AgentLensClear                                          *:AgentLensClear*
-  Clear the timeline history and in-buffer activity marks.
+  Clear the timeline, in-buffer activity, and active follow marker.
 
 :AgentLensInlineToggle                            *:AgentLensInlineToggle*
   Hide or show read/write marks in ordinary file buffers.
+
+:AgentLensFollow                                        *:AgentLensFollow*
+  Toggle live navigation to the active Pi/OMP tool location. Follow is
+  opt-in and requires the bundled extension.
 
 :AgentLensDiff                                            *:AgentLensDiff*
   Open a diff for an edit, or the current file at the requested start line
@@ -81,6 +87,7 @@ Local development: >lua
 
 Global ~
   <leader>al    Toggle timeline panel
+  <leader>af    Toggle Follow Agent
   ]a            Next edit in timeline
   [a            Previous edit in timeline
 
@@ -96,6 +103,7 @@ Timeline buffer ~
   local lens = require("agent-lens")
   lens.setup(opts)       -- Configure and start
   lens.toggle()          -- Toggle timeline panel
+  lens.toggle_follow()   -- Toggle Follow Agent
   lens.start(root)       -- Start watcher
   lens.stop()            -- Stop watcher
   lens.show_diff()       -- Diff for selected entry
@@ -103,20 +111,31 @@ Timeline buffer ~
   lens.clear()           -- Clear timeline
 <
 
-Optional read tracking ~
-  Reads cannot be detected by filesystem notifications. To show successful
-  Pi/OMP `read` tool calls, opt in on BOTH sides:
+Optional Pi/OMP metadata ~
+  Reads and exact tool locations cannot be detected by filesystem
+  notifications. To show successful reads, follow the agent, or both:
 
-  1. Set `reads = { enabled = true }` in setup opts (default: false).
+  1. Set `reads = { enabled = true }`, `follow = { enabled = true }`, or both
+     in setup opts. Both default to false.
   2. Launch a new Pi or OMP session with the bundled extension:
      pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
      omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
 
-  The extension appends relative paths and optional requested line ranges to
-  the repository Git directory at agent-lens/reads.jsonl. No file contents
-  are recorded. The consumer polls every 250 ms (reads.interval_ms), starting
-  at end-of-file without replaying historical events. Other read tools, shell
-  reads, and failed reads are outside this feature. See README.md for details.
+  OMP can load it persistently from `~/.omp/agent/config.yml#extensions` or
+  `~/.omp/agent/extensions/`. The extension appends repository-relative tool
+  locations and successful read ranges to the Git directory at
+  agent-lens/reads.jsonl. It never records contents, patches, prompts, tool
+  output, absolute paths, or secrets. The consumer starts at end-of-file and
+  does not replay history.
+
+Follow Agent ~
+  Follow Agent opens the active read/edit/write target in a safe ordinary
+  editor window, displays one `AGENT` marker, and keeps the line visible. It
+  does not replace modified buffers, steal focus from another window, create
+  timeline entries, or clear static activity marks. Late completions from
+  older parallel calls are ignored. OMP does not report per-file progress
+  inside one multi-file edit, so agent-lens follows the normalized first
+  target and then the first successful result.
 
 In-buffer activity ~
   Enabled by default (`inline = { enabled = true }`). Writes highlight the

@@ -60,15 +60,15 @@ jobs:
           nvim --headless -u NONE \
             -c "set rtp+=." \
             -c "lua require('agent-lens').setup({ enabled = false })" \
-            -c "lua local cmds = vim.api.nvim_get_commands({}); local expected = {'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensInlineToggle','AgentLensStart','AgentLensStop'}; for _, name in ipairs(expected) do if not cmds[name] then print('MISSING: ' .. name); vim.cmd('cq') end end; print('OK: all commands registered')" \
+            -c "lua local cmds = vim.api.nvim_get_commands({}); local expected = {'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensFollow','AgentLensInlineToggle','AgentLensStart','AgentLensStop'}; for _, name in ipairs(expected) do if not cmds[name] then print('MISSING: ' .. name); vim.cmd('cq') end end; print('OK: all commands registered')" \
             -c "qa!"
 
       - name: Config merges correctly
         run: |
           nvim --headless -u NONE \
             -c "set rtp+=." \
-            -c "lua require('agent-lens').setup({ enabled = false, agent_name = 'test-agent', debounce_ms = 500 })" \
-            -c "lua local c = require('agent-lens.config'); assert(c.options.agent_name == 'test-agent', 'agent_name'); assert(c.options.debounce_ms == 500, 'debounce_ms'); assert(c.options.timeline_width == 42, 'default preserved'); print('OK: config merge')" \
+            -c "lua require('agent-lens').setup({ enabled = false, agent_name = 'test-agent', debounce_ms = 500, follow = { enabled = true } })" \
+            -c "lua local c = require('agent-lens.config'); assert(c.options.agent_name == 'test-agent', 'agent_name'); assert(c.options.debounce_ms == 500, 'debounce_ms'); assert(c.options.timeline_width == 42, 'default preserved'); assert(c.options.follow.enabled, 'follow enabled'); assert(c.options.highlights.follow == 'CursorLine', 'follow highlight default'); print('OK: config merge')" \
             -c "qa!"
 
       - name: Health check runs without error
@@ -102,6 +102,9 @@ jobs:
 
       - name: Optional read feed and navigation
         run: nvim --headless -u NONE -l tests/read_events.lua
+
+      - name: Follow Agent navigation and safety
+        run: nvim --headless -u NONE -l tests/follow.lua
 
       - name: Inline read and write activity
         run: nvim --headless -u NONE -l tests/inline.lua

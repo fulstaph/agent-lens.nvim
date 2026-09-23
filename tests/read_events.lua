@@ -33,12 +33,29 @@ end
 local function count()
   return #timeline.entries
 end
+local function follow_marks()
+  local namespace = assert(vim.api.nvim_get_namespaces().agent_lens_follow)
+  local result = {}
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) then
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, namespace, 0, -1, {})) do
+        result[#result + 1] = { buf = buf, mark = mark }
+      end
+    end
+  end
+  return result
+end
 lens.setup({ enabled = false })
 lens.start(root)
 assert(not feed.is_running(), "read tracking must be off by default")
 lens.stop()
 
-lens.setup({ enabled = false, reads = { enabled = true, interval_ms = 100 } })
+lens.setup({
+  enabled = false,
+  reads = { enabled = true, interval_ms = 100 },
+  follow = { enabled = true },
+})
+require("agent-lens.follow").setup({ enabled = true })
 lens.start(root)
 assert(feed.is_running(), "enabled feed should start")
 append('{"v":1,"kind":"read","path":"sample.lua","agent":"pi"}\n')
@@ -52,13 +69,33 @@ assert(timeline.entries[1].kind == "read", "successful read appears")
 assert(timeline.entries[1].rel_path == "sample.lua", "read path preserved")
 assert(timeline.entries[1].agent == "pi", "agent label preserved")
 
+append(
+  '{"v":1,"kind":"location","phase":"start","tool":"read","toolCallId":"call-read","path":"sample.lua","agent":"pi","line":1}\n'
+)
+feed.poll()
+assert(count() == 1, "location records do not create timeline entries")
+local active_marks = follow_marks()
+assert(#active_marks == 1 and active_marks[1].mark[2] == 0, "valid location reaches follow")
+
 append('{"v":1,"kind":"read","path":"../outside.lua"}\n')
 append('{"v":1,"kind":"read","path":"/tmp/outside.lua"}\n')
 append('{"v":1,"kind":"read","path":".git/config"}\n')
 append('{"v":1,"kind":"edit","path":"sample.lua"}\n')
 append("not-json\n")
+append(
+  '{"v":1,"kind":"location","phase":"start","tool":"bash","toolCallId":"bad-tool","path":"sample.lua","line":1}\n'
+)
+append(
+  '{"v":1,"kind":"location","phase":"start","tool":"read","toolCallId":"bad-line","path":"sample.lua","line":0}\n'
+)
 feed.poll()
 assert(count() == 1, "invalid paths and event types must be ignored")
+assert(#follow_marks() == 1, "invalid location records do not replace follow")
+append(
+  '{"v":1,"kind":"location","phase":"error","tool":"read","toolCallId":"call-read","agent":"pi"}\n'
+)
+feed.poll()
+assert(#follow_marks() == 0, "matching error clears follow without changing timeline")
 
 append('{"v":1,"kind":"read","path":"sample.lua"}')
 feed.poll()

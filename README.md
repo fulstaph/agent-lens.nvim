@@ -12,15 +12,16 @@
 
 ---
 
-Run a coding agent beside Neovim: agent-lens shows filesystem edits in a live timeline and highlights changed lines in ordinary file buffers. It opens native diffs against Git `HEAD`. Opt-in Pi/OMP reads can highlight requested lines in the buffer too.
+Run a coding agent beside Neovim: agent-lens shows filesystem edits in a live timeline, highlights changed lines, and opens native diffs against Git `HEAD`. With the optional Pi/OMP bridge, it can also mark successful reads and follow the agent across files as it reads, edits, and writes.
 
-Filesystem edits need no agent integration. Reads cannot be observed through filesystem notifications: the optional Pi extension reports successful `read` tool calls only, without file contents. Neither channel identifies which process made a filesystem edit.
+Filesystem edits need no agent integration. Exact live locations cannot be inferred from filesystem notifications, so Follow Agent uses metadata-only Pi/OMP tool events. The generic filesystem channel still cannot identify which process made an edit.
 
 ## Features
 
 - **Live edit timeline** — chronological feed of every file change with `+N / -M` stats
 - **Native Neovim diffs** — `diffthis` side-by-side (HEAD vs working tree) with full Tree-sitter highlighting
 - **In-buffer activity** — recent read ranges and Git `HEAD`-to-disk changed lines are marked without opening the timeline; use `:AgentLensInlineToggle` to hide/show them
+- **Follow Agent** — opt-in Zed-style navigation opens the active Pi/OMP file, marks one current location, and keeps it visible without replacing unsaved buffers
 - **Zero agent coupling** — works with Pi, Claude Code, Codex CLI, Copilot CLI, OpenCode, Aider, or a human in another terminal
 - **Fast** — macOS uses native FSEvents recursive watching; Linux uses per-directory `inotify` via libuv; all events debounced
 - **Configurable** — panel position, diff layout, ignore patterns, keymaps, highlight groups
@@ -43,6 +44,7 @@ Filesystem edits need no agent integration. Reads cannot be observed through fil
     { "<leader>al", "<cmd>AgentLens<cr>", desc = "Toggle Agent Lens" },
     { "<leader>ad", "<cmd>AgentLensDiff<cr>", desc = "Agent Lens: Show Diff" },
     { "<leader>ac", "<cmd>AgentLensClear<cr>", desc = "Agent Lens: Clear Timeline" },
+    { "<leader>af", "<cmd>AgentLensFollow<cr>", desc = "Agent Lens: Follow Agent" },
   },
   opts = {
     agent_name = "pi",
@@ -68,9 +70,12 @@ Filesystem edits need no agent integration. Reads cannot be observed through fil
 2. The watcher starts automatically if you're in a git repo.
 3. Run your agent in another terminal — writes appear in the timeline and changed lines are highlighted in open file buffers.
 4. Press `<leader>al` to toggle the timeline panel; the in-buffer marks do not require the panel.
-5. Navigate with `j`/`k`; `<CR>` opens a diff for an edit or the current file at the reported line for a read.
+5. With the Pi/OMP bridge loaded, press `<leader>af` to follow or unfollow the agent's current read/edit/write location.
+6. Navigate the timeline with `j`/`k`; `<CR>` opens a diff for an edit or the current file for a read.
 
 In-file write highlights show the current **Git `HEAD` → disk** added/modified lines, not proof that the agent authored those lines. Pure deletions get a nearby `− deleted` label. Read highlights show the **last requested range** when the tool supplies one; a read without a known range gets a file-level label instead. Marks are hidden while a buffer has unsaved local edits, and `:AgentLensClear` removes them.
+
+Follow Agent is separate from static activity marks. It maintains one current marker, does not add location events to the timeline, and never force-replaces a modified buffer. If necessary it opens a non-entered split for the followed file.
 
 ## Commands
 
@@ -82,6 +87,7 @@ In-file write highlights show the current **Git `HEAD` → disk** added/modified
 | `:AgentLensDiff` | Open diff for the selected timeline entry |
 | `:AgentLensClear` | Clear the timeline and in-buffer activity |
 | `:AgentLensInlineToggle` | Hide/show read and write marks in file buffers |
+| `:AgentLensFollow` | Toggle live navigation to the active Pi/OMP location |
 | `:AgentLensClose` | Close all agent-lens windows |
 
 ## Keymaps
@@ -91,6 +97,7 @@ In-file write highlights show the current **Git `HEAD` → disk** added/modified
 | Key | Action |
 |-----|--------|
 | `<leader>al` | Toggle timeline panel |
+| `<leader>af` | Toggle Follow Agent |
 | `]a` | Next edit in timeline |
 | `[a` | Previous edit in timeline |
 
@@ -127,9 +134,13 @@ require("agent-lens").setup({
   inline = {
     enabled = true,             -- Show latest activity in source buffers
   },
+  follow = {
+    enabled = false,            -- Opt in to live Pi/OMP navigation
+  },
 
   keymaps = {
     toggle = "<leader>al",
+    follow = "<leader>af",
     next_edit = "]a",
     prev_edit = "[a",
     open_diff = "<CR>",
@@ -146,6 +157,8 @@ require("agent-lens").setup({
     timeline_time = "Comment",
     timeline_agent = "Keyword",
     timeline_selected = "CursorLine",
+    follow = "CursorLine",
+    follow_label = "DiagnosticInfo",
   },
 
   filter = {
@@ -171,18 +184,23 @@ require("agent-lens").setup({
 5. The timeline panel renders entries newest-first with relative timestamps.
 6. Selecting an entry opens two scratch buffers (HEAD content vs working tree) in `diffthis` mode with full syntax highlighting.
 7. Open Neovim buffers auto-reload via `checktime` autocmds so you see changes live.
+8. The optional Pi/OMP bridge appends correlated metadata-only tool locations. Follow Agent opens a safe editor window, keeps exactly one marker, and ignores late completions from older parallel calls.
 
 ## Agent setup guides
 
-Filesystem edits from any process appear without hooks. Read events require an explicitly loaded Pi/OMP extension and `reads.enabled = true` in Neovim.
+Filesystem edits from any process appear without hooks. Successful read activity and Follow Agent require the bundled Pi/OMP extension; enable `reads`, `follow`, or both in Neovim.
 
 ### Pi agent / Oh My Pi (OMP)
 
-Run Pi or OMP in another terminal in the same Git repository; edits appear without hooks. For reads, opt in on both sides:
+Run Pi or OMP in another terminal in the same Git repository; edits appear without hooks. For read activity and Zed-style following, opt in on both sides:
 
 1. In your LazyVim plugin spec, opt in and restart Neovim:
    ```lua
-   opts = { agent_name = "pi", reads = { enabled = true } }
+   opts = {
+     agent_name = "pi",
+     reads = { enabled = true },
+     follow = { enabled = true },
+   }
    ```
 2. Find the plugin install path in `:Lazy` (typically `~/.local/share/nvim/lazy/agent-lens.nvim`). Start a **new** Pi or OMP session in the same Git repository with the bundled extension:
    ```bash
@@ -190,9 +208,14 @@ Run Pi or OMP in another terminal in the same Git repository; edits appear witho
    # or:
    omp --extension ~/.local/share/nvim/lazy/agent-lens.nvim/extensions/pi-read-events.js
    ```
-3. Ask Pi or OMP to use its built-in `read` tool on a project file (OMP's `:50-100` and `:raw:50-100` selectors work too). The timeline shows `READ · pi`; `<CR>` opens the current file at the reported first line when available. The source buffer highlights a known requested range; otherwise it shows a file-level `READ · pi` label. Edits still show Git `HEAD` diffs.
+   For persistent OMP loading, add the same absolute file path under `extensions:` in `~/.omp/agent/config.yml`, or symlink the file into `~/.omp/agent/extensions/`.
+3. Trigger a built-in `read`, `edit`, or `write`. Follow Agent opens the reported file and centers the latest reliable line. Successful reads still add `READ · pi` timeline entries and static range highlights.
 
-The extension writes **only relative path and optional requested line-range metadata**, not file contents or tool output, to `<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`). Neovim starts at the log's current end; it never replays previous sessions. A read outside the repository, a failed read, and reads via shell commands, `eval`, or external tools are **not captured**. Remove `--extension` to stop producing events; `reads.enabled = false` only stops Neovim from consuming them. Delete the JSONL file when you no longer need its local path history.
+The extension writes **only repository-relative paths, tool lifecycle IDs, tool names, phases, and optional line/range metadata** to `<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`). It never records file contents, write text, patches, prompts, tool output, absolute paths, or secrets. Neovim starts at the log's current end and never replays previous sessions. Paths outside the repository, `.git`, unsafe symlinks, and unsupported non-file targets are rejected at both producer and consumer boundaries.
+
+Follow starts immediately from a normalized tool target, then refines the location after a successful result. A failed active call clears its marker; a late completion from an older parallel call cannot replace a newer location. OMP exposes one lifecycle for a multi-file edit, not per-file streaming progress, so agent-lens follows the first normalized target and then the first successful result rather than fabricating intermediate positions.
+
+Remove `--extension` (or the persistent extension entry) to stop producing metadata. `reads.enabled = false` disables static read activity; `follow.enabled = false` disables automatic navigation. The local JSONL path history remains until you delete the file.
 
 ### Claude Code
 
@@ -239,7 +262,7 @@ opts = { agent_name = "my-agent" }
 
 ### Multi-agent workflows
 
-When running multiple agents simultaneously (e.g. Pi in one pane, Claude Code in another), all edits appear in the same timeline. The `agent_name` label is global for now — a future version will infer which process wrote each file.
+When multiple agents run simultaneously, filesystem edits still share one unattributed timeline. Follow Agent uses the latest correlated event in the Pi/OMP metadata feed; one marker is shown at a time.
 
 ## Health check
 
