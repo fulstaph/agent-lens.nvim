@@ -73,7 +73,7 @@ jobs:
 
       - name: Health check runs without error
         run: |
-          git init /tmp/test-repo && cd /tmp/test-repo && git commit --allow-empty -m "init"
+          git init /tmp/test-repo && cd /tmp/test-repo && git config user.email "ci@test" && git config user.name "CI" && git commit --allow-empty -m "init"
           nvim --headless -u NONE \
             -c "set rtp+=$OLDPWD" \
             -c "lua require('agent-lens').setup({ enabled = false })" \

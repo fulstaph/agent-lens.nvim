@@ -161,6 +161,81 @@ require("agent-lens").setup({
 6. Selecting an entry opens two scratch buffers (HEAD content vs working tree) in `diffthis` mode with full syntax highlighting.
 7. Open Neovim buffers auto-reload via `checktime` autocmds so you see changes live.
 
+## Agent setup guides
+
+agent-lens is fully agent-agnostic — it watches the filesystem, not any specific agent's IPC.
+Every guide below boils down to: **run the agent in a separate terminal on the same repo, and agent-lens picks up every file write automatically.**
+
+### Pi agent (Oh My Pi)
+
+[Pi agent](https://docs.oh-my-pi.dev) edits files directly on disk via its `edit` and `write` tools. No hooks or extra config needed — agent-lens sees every write the moment it lands.
+
+**Recommended workflow:**
+
+1. Open your project in Neovim with agent-lens installed.
+2. In a second terminal (or a Zellij/tmux pane), start Pi:
+   ```bash
+   omp   # or: pi
+   ```
+3. Press `<leader>al` in Neovim to open the timeline.
+4. Ask Pi to make changes — they appear in the timeline in real-time.
+5. Press `<CR>` on any entry to review the diff.
+
+**Tip:** Set `agent_name = "pi"` in your config so timeline entries are labeled clearly:
+
+```lua
+opts = { agent_name = "pi" }
+```
+
+If you use Pi's subagents (scout, task, etc.), all of their edits funnel through the same filesystem and are tracked identically.
+
+### Claude Code
+
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) writes files via `Edit` and `Write` tool calls.
+
+```bash
+# In a separate terminal, same project directory:
+claude
+```
+
+```lua
+opts = { agent_name = "claude" }
+```
+
+For pre-write interception (approve/reject before disk write), pair with [code-preview.nvim](https://github.com/Cannon07/code-preview.nvim). agent-lens complements it by providing the post-write timeline and diff history.
+
+### OpenAI Codex CLI
+
+```bash
+codex
+```
+
+```lua
+opts = { agent_name = "codex" }
+```
+
+### Aider
+
+```bash
+aider
+```
+
+```lua
+opts = { agent_name = "aider" }
+```
+
+### Any other agent or process
+
+If it writes files in a git repo, agent-lens tracks it. No integration code required.
+
+```lua
+opts = { agent_name = "my-agent" }
+```
+
+### Multi-agent workflows
+
+When running multiple agents simultaneously (e.g. Pi in one pane, Claude Code in another), all edits appear in the same timeline. The `agent_name` label is global for now — a future version will infer which process wrote each file.
+
 ## Health check
 
 ```vim
