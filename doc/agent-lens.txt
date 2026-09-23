@@ -1,0 +1,104 @@
+*agent-lens.txt*  Watch AI agent edits in real-time inside Neovim
+
+==============================================================================
+CONTENTS                                              *agent-lens-contents*
+
+  1. Introduction ........................ |agent-lens-intro|
+  2. Requirements ........................ |agent-lens-requirements|
+  3. Installation ........................ |agent-lens-installation|
+  4. Commands ............................ |agent-lens-commands|
+  5. Keymaps ............................. |agent-lens-keymaps|
+  6. API ................................. |agent-lens-api|
+
+==============================================================================
+1. INTRODUCTION                                          *agent-lens-intro*
+
+agent-lens.nvim watches your project for file changes made by AI coding
+agents (Pi, Claude Code, Codex, etc.) and shows an interactive timeline of
+edits with native Neovim diffs.
+
+Agent-agnostic: watches the filesystem via libuv and diffs against git HEAD.
+Any agent that writes files is tracked automatically.
+
+==============================================================================
+2. REQUIREMENTS                                   *agent-lens-requirements*
+
+- Neovim >= 0.10
+- git
+- A project under git version control
+
+==============================================================================
+3. INSTALLATION                                   *agent-lens-installation*
+
+With lazy.nvim (GitHub): >lua
+  {
+    "your-username/agent-lens.nvim",
+    event = "VeryLazy",
+    opts = { agent_name = "pi" },
+    config = function(_, opts)
+      require("agent-lens").setup(opts)
+    end,
+  }
+<
+Local development: >lua
+  {
+    dir = "~/agent-lens.nvim",
+    event = "VeryLazy",
+    opts = { agent_name = "pi" },
+    config = function(_, opts)
+      require("agent-lens").setup(opts)
+    end,
+  }
+<
+
+==============================================================================
+4. COMMANDS                                           *agent-lens-commands*
+
+:AgentLens                                                    *:AgentLens*
+  Toggle the timeline panel. Starts the watcher if not running.
+
+:AgentLensStart [dir]                                    *:AgentLensStart*
+  Start the file watcher. Optionally specify a directory.
+
+:AgentLensStop                                            *:AgentLensStop*
+  Stop the file watcher.
+
+:AgentLensClear                                          *:AgentLensClear*
+  Clear the timeline history.
+
+:AgentLensDiff                                            *:AgentLensDiff*
+  Open a native diff for the currently selected timeline entry.
+
+:AgentLensClose                                          *:AgentLensClose*
+  Close all agent-lens windows (timeline + diff).
+
+==============================================================================
+5. KEYMAPS                                             *agent-lens-keymaps*
+
+Global ~
+  <leader>al    Toggle timeline panel
+  ]a            Next edit in timeline
+  [a            Previous edit in timeline
+
+Timeline buffer ~
+  j / k         Navigate entries
+  <CR>          Open diff for selected entry
+  q             Close timeline
+  R             Refresh
+
+==============================================================================
+6. API                                                     *agent-lens-api*
+
+>lua
+  local lens = require("agent-lens")
+  lens.setup(opts)       -- Configure and start
+  lens.toggle()          -- Toggle timeline panel
+  lens.start(root)       -- Start watcher
+  lens.stop()            -- Stop watcher
+  lens.show_diff()       -- Diff for selected entry
+  lens.close_all()       -- Close all windows
+  lens.clear()           -- Clear timeline
+<
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
