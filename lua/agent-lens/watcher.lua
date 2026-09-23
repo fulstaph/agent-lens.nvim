@@ -24,11 +24,8 @@ local uv = vim.uv or vim.loop
 local function is_ignored(path, patterns)
   for _, pat in ipairs(patterns) do
     -- Convert glob to a lua pattern (simplified but covers the common cases)
-    local lua_pat = pat
-      :gsub("%.", "%%.")
-      :gsub("%*%*/", "(.+/)?")
-      :gsub("%*", "[^/]*")
-      :gsub("%?", "[^/]")
+    local lua_pat =
+      pat:gsub("%.", "%%."):gsub("%*%*/", "(.+/)?"):gsub("%*", "[^/]*"):gsub("%?", "[^/]")
     lua_pat = "^" .. lua_pat .. "$"
     if path:match(lua_pat) then
       return true
@@ -55,55 +52,63 @@ local function watch_dir_recursive(watcher, dir)
     return
   end
 
-  local ok = handle:start(dir, { recursive = false }, vim.schedule_wrap(function(err, filename, events)
-    if err then
-      return
-    end
-    if not filename then
-      return
-    end
-
-    local full_path = dir .. "/" .. filename
-    local rel_path = full_path:sub(#watcher.root + 2)
-
-    if is_ignored(rel_path, config.options.filter.ignore_patterns) then
-      return
-    end
-
-    -- Check if it's a new directory — if so, watch it too
-    local stat = uv.fs_stat(full_path)
-    if stat and stat.type == "directory" then
-      watch_dir_recursive(watcher, full_path)
-      return
-    end
-
-    -- Debounce: cancel any pending timer for this file
-    if watcher._debounce_timers[full_path] then
-      watcher._debounce_timers[full_path]:stop()
-      watcher._debounce_timers[full_path]:close()
-      watcher._debounce_timers[full_path] = nil
-    end
-
-    local timer = uv.new_timer()
-    if not timer then
-      return
-    end
-    watcher._debounce_timers[full_path] = timer
-    timer:start(config.options.debounce_ms, 0, vim.schedule_wrap(function()
-      timer:stop()
-      timer:close()
-      watcher._debounce_timers[full_path] = nil
-
-      -- Verify file still exists (not a transient temp file)
-      local final_stat = uv.fs_stat(full_path)
-      if final_stat and final_stat.type == "file" then
-        watcher._on_change(rel_path, events)
-      elseif not final_stat and events.rename then
-        -- File was deleted
-        watcher._on_change(rel_path, { rename = true, deleted = true })
+  local ok = handle:start(
+    dir,
+    { recursive = false },
+    vim.schedule_wrap(function(err, filename, events)
+      if err then
+        return
       end
-    end))
-  end))
+      if not filename then
+        return
+      end
+
+      local full_path = dir .. "/" .. filename
+      local rel_path = full_path:sub(#watcher.root + 2)
+
+      if is_ignored(rel_path, config.options.filter.ignore_patterns) then
+        return
+      end
+
+      -- Check if it's a new directory — if so, watch it too
+      local stat = uv.fs_stat(full_path)
+      if stat and stat.type == "directory" then
+        watch_dir_recursive(watcher, full_path)
+        return
+      end
+
+      -- Debounce: cancel any pending timer for this file
+      if watcher._debounce_timers[full_path] then
+        watcher._debounce_timers[full_path]:stop()
+        watcher._debounce_timers[full_path]:close()
+        watcher._debounce_timers[full_path] = nil
+      end
+
+      local timer = uv.new_timer()
+      if not timer then
+        return
+      end
+      watcher._debounce_timers[full_path] = timer
+      timer:start(
+        config.options.debounce_ms,
+        0,
+        vim.schedule_wrap(function()
+          timer:stop()
+          timer:close()
+          watcher._debounce_timers[full_path] = nil
+
+          -- Verify file still exists (not a transient temp file)
+          local final_stat = uv.fs_stat(full_path)
+          if final_stat and final_stat.type == "file" then
+            watcher._on_change(rel_path, events)
+          elseif not final_stat and events.rename then
+            -- File was deleted
+            watcher._on_change(rel_path, { rename = true, deleted = true })
+          end
+        end)
+      )
+    end)
+  )
 
   if ok then
     watcher.watchers[dir] = handle
@@ -150,42 +155,50 @@ function M.start(root, on_change)
   if jit and jit.os == "OSX" then
     local handle = uv.new_fs_event()
     if handle then
-      local ok = handle:start(root, { recursive = true }, vim.schedule_wrap(function(err, filename, events)
-        if err or not filename then
-          return
-        end
-
-        if is_ignored(filename, config.options.filter.ignore_patterns) then
-          return
-        end
-
-        local full_path = root .. "/" .. filename
-
-        -- Debounce
-        if watcher._debounce_timers[full_path] then
-          watcher._debounce_timers[full_path]:stop()
-          watcher._debounce_timers[full_path]:close()
-          watcher._debounce_timers[full_path] = nil
-        end
-
-        local timer = uv.new_timer()
-        if not timer then
-          return
-        end
-        watcher._debounce_timers[full_path] = timer
-        timer:start(config.options.debounce_ms, 0, vim.schedule_wrap(function()
-          timer:stop()
-          timer:close()
-          watcher._debounce_timers[full_path] = nil
-
-          local stat = uv.fs_stat(full_path)
-          if stat and stat.type == "file" then
-            watcher._on_change(filename, events)
-          elseif not stat and events.rename then
-            watcher._on_change(filename, { rename = true, deleted = true })
+      local ok = handle:start(
+        root,
+        { recursive = true },
+        vim.schedule_wrap(function(err, filename, events)
+          if err or not filename then
+            return
           end
-        end))
-      end))
+
+          if is_ignored(filename, config.options.filter.ignore_patterns) then
+            return
+          end
+
+          local full_path = root .. "/" .. filename
+
+          -- Debounce
+          if watcher._debounce_timers[full_path] then
+            watcher._debounce_timers[full_path]:stop()
+            watcher._debounce_timers[full_path]:close()
+            watcher._debounce_timers[full_path] = nil
+          end
+
+          local timer = uv.new_timer()
+          if not timer then
+            return
+          end
+          watcher._debounce_timers[full_path] = timer
+          timer:start(
+            config.options.debounce_ms,
+            0,
+            vim.schedule_wrap(function()
+              timer:stop()
+              timer:close()
+              watcher._debounce_timers[full_path] = nil
+
+              local stat = uv.fs_stat(full_path)
+              if stat and stat.type == "file" then
+                watcher._on_change(filename, events)
+              elseif not stat and events.rename then
+                watcher._on_change(filename, { rename = true, deleted = true })
+              end
+            end)
+          )
+        end)
+      )
 
       if ok then
         watcher.watchers[root] = handle

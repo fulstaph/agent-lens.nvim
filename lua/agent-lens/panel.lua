@@ -71,8 +71,18 @@ local function render_entry(entry)
   local line2 = "  " .. time_str .. "  " .. stats
 
   local hls = {
-    { line = 0, col_start = #icon, col_end = #line1, group = config.options.highlights.timeline_file },
-    { line = 1, col_start = 2, col_end = 2 + #time_str, group = config.options.highlights.timeline_time },
+    {
+      line = 0,
+      col_start = #icon,
+      col_end = #line1,
+      group = config.options.highlights.timeline_file,
+    },
+    {
+      line = 1,
+      col_start = 2,
+      col_end = 2 + #time_str,
+      group = config.options.highlights.timeline_time,
+    },
   }
 
   if entry.stats.added > 0 then
@@ -178,8 +188,22 @@ function M.render()
   if M._cursor and #entries > 0 then
     local sel_line = 2 + (M._cursor - 1) * 3 -- header(2) + 3 lines per entry
     if sel_line < #lines then
-      vim.api.nvim_buf_add_highlight(M._buf, ns, config.options.highlights.timeline_selected, sel_line, 0, -1)
-      vim.api.nvim_buf_add_highlight(M._buf, ns, config.options.highlights.timeline_selected, sel_line + 1, 0, -1)
+      vim.api.nvim_buf_add_highlight(
+        M._buf,
+        ns,
+        config.options.highlights.timeline_selected,
+        sel_line,
+        0,
+        -1
+      )
+      vim.api.nvim_buf_add_highlight(
+        M._buf,
+        ns,
+        config.options.highlights.timeline_selected,
+        sel_line + 1,
+        0,
+        -1
+      )
     end
   end
 end

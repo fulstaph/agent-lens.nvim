@@ -89,7 +89,9 @@ local function parse_hunks(diff_lines)
         header = line,
         lines = {},
       }
-    elseif current_hunk and (line:sub(1, 1) == "+" or line:sub(1, 1) == "-" or line:sub(1, 1) == " ") then
+    elseif
+      current_hunk and (line:sub(1, 1) == "+" or line:sub(1, 1) == "-" or line:sub(1, 1) == " ")
+    then
       current_hunk.lines[#current_hunk.lines + 1] = line
     end
   end
@@ -110,10 +112,21 @@ function M.file_diff(root, rel_path)
 
   local raw
   if is_tracked then
-    raw = vim.fn.systemlist({ "git", "-C", root, "diff", "--no-color", "-U3", "HEAD", "--", rel_path })
+    raw =
+      vim.fn.systemlist({ "git", "-C", root, "diff", "--no-color", "-U3", "HEAD", "--", rel_path })
   else
     -- Untracked file — diff against /dev/null
-    raw = vim.fn.systemlist({ "git", "-C", root, "diff", "--no-color", "-U3", "--no-index", "/dev/null", rel_path })
+    raw = vim.fn.systemlist({
+      "git",
+      "-C",
+      root,
+      "diff",
+      "--no-color",
+      "-U3",
+      "--no-index",
+      "/dev/null",
+      rel_path,
+    })
   end
 
   if #raw == 0 then

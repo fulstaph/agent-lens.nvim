@@ -31,7 +31,9 @@ function M.check()
   if root then
     vim.health.ok("Git repository detected: " .. root)
   else
-    vim.health.warn("Not currently in a git repository — agent-lens needs a repo to compute diffs")
+    vim.health.warn(
+      "Not currently in a git repository — agent-lens needs a repo to compute diffs"
+    )
   end
 
   -- Check watcher state

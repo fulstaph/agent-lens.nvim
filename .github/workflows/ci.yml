@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  stylua:
+    name: StyLua
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check .
+
+  luacheck:
+    name: Luacheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install luacheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4 luarocks
+          sudo luarocks install luacheck
+      - name: Run luacheck
+        run: luacheck lua/ plugin/ --globals vim jit --no-max-line-length --no-unused-args
+
+  tests:
+    name: Tests (Neovim ${{ matrix.neovim }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim: [v0.10.4, stable, nightly]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+
+      - name: Plugin loads without error
+        run: |
+          nvim --version | head -1
+          nvim --headless -u NONE \
+            -c "set rtp+=." \
+            -c "lua local ok, err = pcall(require, 'agent-lens'); if not ok then print('FAIL: ' .. err); vim.cmd('cq') else print('OK: plugin loaded') end" \
+            -c "qa!"
+
+      - name: Setup registers all commands
+        run: |
+          nvim --headless -u NONE \
+            -c "set rtp+=." \
+            -c "lua require('agent-lens').setup({ enabled = false })" \
+            -c "lua local cmds = vim.api.nvim_get_commands({}); local expected = {'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensStart','AgentLensStop'}; for _, name in ipairs(expected) do if not cmds[name] then print('MISSING: ' .. name); vim.cmd('cq') end end; print('OK: all commands registered')" \
+            -c "qa!"
+
+      - name: Config merges correctly
+        run: |
+          nvim --headless -u NONE \
+            -c "set rtp+=." \
+            -c "lua require('agent-lens').setup({ enabled = false, agent_name = 'test-agent', debounce_ms = 500 })" \
+            -c "lua local c = require('agent-lens.config'); assert(c.options.agent_name == 'test-agent', 'agent_name'); assert(c.options.debounce_ms == 500, 'debounce_ms'); assert(c.options.timeline_width == 42, 'default preserved'); print('OK: config merge')" \
+            -c "qa!"
+
+      - name: Health check runs without error
+        run: |
+          git init /tmp/test-repo && cd /tmp/test-repo && git commit --allow-empty -m "init"
+          nvim --headless -u NONE \
+            -c "set rtp+=$OLDPWD" \
+            -c "lua require('agent-lens').setup({ enabled = false })" \
+            -c "lua require('agent-lens.health').check(); print('OK: health check')" \
+            -c "qa!"
+
+      - name: Timeline data model works
+        run: |
+          nvim --headless -u NONE \
+            -c "set rtp+=." \
+            -c "lua require('agent-lens').setup({ enabled = false })" \
+            -c "lua local t = require('agent-lens.timeline'); t.add({ rel_path = 'foo.lua', status = 'modified', stats = { added = 3, removed = 1 } }); t.add({ rel_path = 'bar.lua', status = 'added', stats = { added = 10, removed = 0 } }); assert(#t.entries == 2, 'count'); local s = t.summary(); assert(s.total == 2, 'total'); assert(s.files == 2, 'files'); assert(s.added == 13, 'added'); assert(s.removed == 1, 'removed'); t.clear(); assert(#t.entries == 0, 'cleared'); print('OK: timeline')" \
+            -c "qa!"
+
+      - name: Diff engine parses git output
+        run: |
+          cd /tmp && rm -rf lens-test && mkdir lens-test && cd lens-test
+          git init && git config user.email "ci@test" && git config user.name "CI"
+          echo "line1" > test.txt && git add test.txt && git commit -m "init"
+          echo -e "line1\nline2" > test.txt
+          nvim --headless -u NONE \
+            -c "set rtp+=$OLDPWD" \
+            -c "cd /tmp/lens-test" \
+            -c "lua local d = require('agent-lens.diff'); local root = d.git_root(); assert(root, 'no git root'); local fd = d.file_diff(root, 'test.txt'); assert(fd, 'no diff'); assert(fd.stats.added >= 1, 'added lines'); assert(#fd.hunks >= 1, 'hunks'); print('OK: diff engine')" \
+            -c "qa!"
