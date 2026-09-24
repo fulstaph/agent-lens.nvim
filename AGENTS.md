@@ -28,10 +28,18 @@ doc/
 ```
 
 The optional `extensions/pi-read-events.js` listens for `read`, `edit`, and
-`write` tool lifecycles. It appends correlated repository-relative locations
-and successful read ranges to `<git-dir>/agent-lens/reads.jsonl`. Neovim polls
-complete records, validates them again, and fans them into independent
-timeline, inline, and follow projections.
+`write` tool lifecycles plus Pi/OMP assistant-stream lifecycle events. It
+appends correlated repository-relative locations and successful read ranges to
+`<git-dir>/agent-lens/reads.jsonl`. Complete streamed edit sections/hunks may
+emit speculative progress metadata; no edit bodies, prompts, or raw deltas are
+stored. Neovim polls complete records, validates them again, and fans them
+into independent timeline, inline, and follow projections.
+The bridge is installable as a dual-host package:
+`omp install github:fulstaph/agent-lens.nvim` or
+`pi install git:github.com/fulstaph/agent-lens.nvim`; use `omp install .` or
+`pi install .` for local development, then restart the host session. Direct
+`--extension /path/to/extensions/pi-read-events.js` loading remains the
+one-session fallback.
 
 ### Data flow
 
@@ -44,11 +52,11 @@ filesystem write → vim.uv.fs_event (watcher.lua)
   → checktime → inline.record_write() (inline.lua)
   → user selects entry → diff_view.open() (diff_view.lua)
 
-Pi/OMP tool_call/result → metadata-only JSONL
+Pi/OMP message_update/tool_call/result → metadata-only JSONL
   → read_events.poll() validates repository paths and lifecycle fields
   → successful read → timeline.add() + inline.record_read()
   → correlated location → follow.record_location()
-  → one safe editor window + one agent_lens_follow extmark
+  → current safe editor window + cursor + one agent_lens_follow extmark
 ```
 
 ### Key types
@@ -57,7 +65,7 @@ Pi/OMP tool_call/result → metadata-only JSONL
 - `TimelineEntry` — `{id, timestamp, rel_path, status, kind?, stats, agent, range?, diff_cached}`; `kind="read"` has no diff
 - `FileDiff` — `{rel_path, status, hunks[], stats, raw}`
 - `DiffHunk` — `{old_start, old_count, new_start, new_count, header, lines[]}`
-- `AgentLocation` — `{call_id, phase, tool, path?, line?, agent}` normalized by `read_events.lua`
+- `AgentLocation` — `{call_id, phase, tool, path?, line?, agent, sequence?}` normalized by `read_events.lua`; `progress` is edit-only and sequence-bearing
 
 ## Development rules
 
@@ -86,27 +94,32 @@ nvim --headless -u NONE -c "set rtp+=." \
   -c "qa!"
 ```
 
-The metadata path, follow projection, and in-buffer overlays have behavioral
-tests:
+The metadata path, follow projection, in-buffer overlays, and installable
+bridge package have behavioral tests:
 
 ```bash
 nvim --headless -u NONE -l tests/read_events.lua
 nvim --headless -u NONE -l tests/follow.lua
+nvim --headless -u NONE -l tests/follow_lifecycle.lua
+nvim --headless -u NONE -l tests/watcher.lua
 nvim --headless -u NONE -l tests/inline.lua
-node tests/pi-read-events.test.mjs
+npm run test:extension
+npm pack --dry-run --json
 ```
 
 ## Adding an agent metadata source
-
 Filesystem edits stay agent-agnostic. A successful read record uses `v: 1`,
 `kind: "read"`, a repository-relative `path`, an `agent`, and optional
 `range: { start, end }`. A live location uses `kind: "location"`,
-`phase: "start"|"success"|"error"`, `tool: "read"|"edit"|"write"`, a bounded
-`toolCallId`, optional safe `path`, and optional positive 1-based `line`.
+`phase: "progress"|"start"|"success"|"error"`, `tool: "read"|"edit"|"write"`,
+and a bounded `toolCallId`. `progress` is edit-only, requires a positive
+`sequence` and a safe repository-relative `path`; its line is optional and,
+when present, positive and 1-based.
+Other lifecycle records remain byte-compatible and do not carry `sequence`.
 Write complete JSON objects to the active Git directory's
-`agent-lens/reads.jsonl`. Never include contents, patches, prompts, tool
-output, absolute paths, or secrets. Validate the repository boundary at the
-source and keep the Neovim consumer's independent validation in place.
+`agent-lens/reads.jsonl`. Never include contents, patches, prompts, raw deltas,
+tool output, absolute paths, or secrets. Validate the repository boundary at
+the source and keep the Neovim consumer's independent validation in place.
 
 ## File conventions
 

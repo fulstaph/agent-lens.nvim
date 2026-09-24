@@ -37,6 +37,22 @@ local function inside_project(real_root, path)
   return path == real_root or path:sub(1, #real_root + 1) == real_root .. "/"
 end
 
+local function has_symlink_component(candidate)
+  local relative = candidate:sub(#root + 2)
+  local component = root
+  for part in relative:gmatch("[^/]+") do
+    component = component .. "/" .. part
+    local stat = uv.fs_lstat(component)
+    if stat and stat.type == "link" then
+      return true
+    end
+    if not stat then
+      return false
+    end
+  end
+  return false
+end
+
 local function valid_path(path, allow_missing)
   if not relative_path(path) then
     return false
@@ -46,6 +62,9 @@ local function valid_path(path, allow_missing)
     return false
   end
   local candidate = root .. "/" .. path
+  if has_symlink_component(candidate) then
+    return false
+  end
   local resolved = uv.fs_realpath(candidate)
   if resolved then
     local stat = uv.fs_stat(resolved)
@@ -108,7 +127,7 @@ local function deliver_read(event)
 end
 
 local function deliver_location(event)
-  local phases = { start = true, success = true, error = true }
+  local phases = { start = true, progress = true, success = true, error = true }
   local tools = { read = true, edit = true, write = true }
   if
     not phases[event.phase]
@@ -119,12 +138,26 @@ local function deliver_location(event)
   then
     return
   end
+  if event.phase == "progress" and event.tool ~= "edit" then
+    return
+  end
+  if event.phase == "progress" then
+    if type(event.sequence) ~= "number" or event.sequence % 1 ~= 0 or event.sequence < 1 then
+      return
+    end
+  elseif event.sequence ~= nil then
+    return
+  end
   local line = event.line
   if line ~= nil and (type(line) ~= "number" or line % 1 ~= 0 or line < 1) then
     return
   end
   if event.phase ~= "error" then
-    local allow_missing = event.phase == "start" and event.tool == "write"
+    local allow_missing = (event.phase == "start" and event.tool == "write")
+      or (
+        event.tool == "edit"
+        and (event.phase == "start" or event.phase == "progress" or event.phase == "success")
+      )
     if not valid_path(event.path, allow_missing) then
       return
     end
@@ -136,6 +169,7 @@ local function deliver_location(event)
     path = event.phase ~= "error" and event.path or nil,
     line = line,
     agent = agent_name(event.agent),
+    sequence = event.sequence,
   })
 end
 

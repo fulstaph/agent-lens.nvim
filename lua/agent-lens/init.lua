@@ -86,9 +86,9 @@ local function on_file_change(rel_path, events)
     })
   else
     -- Reverted to HEAD; remove the previous write decoration.
+    follow.file_changed(M._root, rel_path)
     vim.cmd("silent! checktime")
     inline.record_write(M._root, rel_path, nil)
-    follow.file_changed(M._root, rel_path)
     return
   end
 
@@ -105,10 +105,10 @@ local function on_file_change(rel_path, events)
     end
   end
 
-  -- Also trigger checktime so open buffers reload
+  -- Hydrate Follow drafts before checktime can prompt about a newly created file.
+  follow.file_changed(M._root, rel_path)
   vim.cmd("silent! checktime")
   inline.record_write(M._root, rel_path, not events.deleted and file_diff or nil)
-  follow.file_changed(M._root, rel_path)
 end
 
 --- Start watching the project for file changes.

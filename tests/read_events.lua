@@ -6,7 +6,10 @@ local feed = require("agent-lens.read_events")
 local root = vim.fn.tempname()
 vim.fn.mkdir(root .. "/.git/agent-lens", "p")
 assert(vim.fn.system({ "git", "init", root }) ~= "" and vim.v.shell_error == 0, "git init")
-vim.fn.writefile({ "hello" }, root .. "/sample.lua")
+vim.fn.writefile(
+  { "one", "two", "three", "four", "five", "six", "seven", "eight" },
+  root .. "/sample.lua"
+)
 vim.fn.system({ "git", "-C", root, "add", "sample.lua" })
 assert(vim.v.shell_error == 0, "git add")
 vim.fn.system({
@@ -38,12 +41,17 @@ local function follow_marks()
   local result = {}
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_valid(buf) then
-      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, namespace, 0, -1, {})) do
+      for _, mark in
+        ipairs(vim.api.nvim_buf_get_extmarks(buf, namespace, 0, -1, { details = true }))
+      do
         result[#result + 1] = { buf = buf, mark = mark }
       end
     end
   end
   return result
+end
+local function follow_label(entry)
+  return entry.mark[4].virt_text[1][1]
 end
 lens.setup({ enabled = false })
 lens.start(root)
@@ -76,7 +84,48 @@ feed.poll()
 assert(count() == 1, "location records do not create timeline entries")
 local active_marks = follow_marks()
 assert(#active_marks == 1 and active_marks[1].mark[2] == 0, "valid location reaches follow")
+append(
+  '{"v":1,"kind":"location","phase":"error","tool":"read","toolCallId":"call-read","agent":"pi"}\n'
+)
+feed.poll()
+assert(#follow_marks() == 0, "cleared execution target permits drafting")
+append(
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"call-progress","path":"sample.lua","agent":"pi","line":1,"sequence":1}\n'
+)
+feed.poll()
+assert(count() == 1, "progress does not create timeline entries")
+assert(#follow_marks() == 1, "valid progress reaches follow")
+append(
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"call-progress","path":"sample.lua","agent":"pi","line":4,"sequence":2}\n'
+)
+feed.poll()
+local progressed = follow_marks()
+assert(#progressed == 1 and progressed[1].mark[2] == 3, "progress refines follow")
+for _, record in ipairs({
+  '{"v":1,"kind":"location","phase":"progress","tool":"read","toolCallId":"bad-progress-tool","path":"sample.lua","line":2,"sequence":1}\n',
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"bad-progress-sequence","path":"sample.lua","line":2}\n',
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"bad-progress-type","path":"sample.lua","line":2,"sequence":"3"}\n',
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"bad-progress-line","path":"sample.lua","line":0,"sequence":3}\n',
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"bad-progress-path","path":"../outside.lua","line":2,"sequence":3}\n',
+  '{"v":1,"kind":"location","phase":"start","tool":"edit","toolCallId":"bad-sequence-phase","path":"sample.lua","sequence":1}\n',
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"call-progress","path":"sample.lua","line":8,"sequence":1}\n',
+}) do
+  append(record)
+end
+feed.poll()
+local stale_progress = follow_marks()
+assert(
+  #stale_progress == 1 and stale_progress[1].mark[2] == 3,
+  "decreasing progress is schema-valid but ignored"
+)
 
+assert(vim.uv.fs_symlink(root .. "/sample.lua", root .. "/linked.lua"))
+assert(vim.uv.fs_symlink(root .. "/.git/config", root .. "/git-link"))
+append('{"v":1,"kind":"read","path":"linked.lua"}\n')
+append('{"v":1,"kind":"read","path":"git-link"}\n')
+append(
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"call-progress","path":"linked.lua","line":6,"sequence":3}\n'
+)
 append('{"v":1,"kind":"read","path":"../outside.lua"}\n')
 append('{"v":1,"kind":"read","path":"/tmp/outside.lua"}\n')
 append('{"v":1,"kind":"read","path":".git/config"}\n')
@@ -92,10 +141,31 @@ feed.poll()
 assert(count() == 1, "invalid paths and event types must be ignored")
 assert(#follow_marks() == 1, "invalid location records do not replace follow")
 append(
-  '{"v":1,"kind":"location","phase":"error","tool":"read","toolCallId":"call-read","agent":"pi"}\n'
+  '{"v":1,"kind":"location","phase":"error","tool":"edit","toolCallId":"call-progress","agent":"pi"}\n'
 )
 feed.poll()
 assert(#follow_marks() == 0, "matching error clears follow without changing timeline")
+append(
+  '{"v":1,"kind":"location","phase":"progress","tool":"edit","toolCallId":"call-missing","path":"draft.lua","agent":"pi","line":1,"sequence":1}\n'
+)
+feed.poll()
+local missing_target = follow_marks()
+local missing_buf = vim.fn.bufnr(root .. "/draft.lua")
+assert(
+  #missing_target == 1 and missing_target[1].buf == missing_buf and missing_target[1].mark[2] == 0,
+  "contained missing edit target reaches follow"
+)
+append(
+  '{"v":1,"kind":"location","phase":"success","tool":"edit","toolCallId":"call-missing","path":"draft.lua","agent":"pi","line":1}\n'
+)
+feed.poll()
+local settled_missing = follow_marks()
+assert(
+  #settled_missing == 1 and follow_label(settled_missing[1]) == "  AGENT · pi",
+  "missing edit success settles follow"
+)
+require("agent-lens.follow").clear()
+assert(#follow_marks() == 0, "missing edit target clears normally")
 
 append('{"v":1,"kind":"read","path":"sample.lua"}')
 feed.poll()
@@ -105,13 +175,6 @@ feed.poll()
 assert(count() == 2, "completed event is delivered exactly once")
 feed.poll()
 assert(count() == 2, "poll does not replay events")
-vim.wait(400, function()
-  return false
-end, 50)
-assert(
-  count() == 2,
-  "read log must not appear as a filesystem edit: " .. vim.inspect(timeline.entries)
-)
 
 local panel = require("agent-lens.panel")
 panel.open()

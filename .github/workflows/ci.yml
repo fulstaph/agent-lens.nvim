@@ -68,7 +68,7 @@ jobs:
           nvim --headless -u NONE \
             -c "set rtp+=." \
             -c "lua require('agent-lens').setup({ enabled = false, agent_name = 'test-agent', debounce_ms = 500, follow = { enabled = true } })" \
-            -c "lua local c = require('agent-lens.config'); assert(c.options.agent_name == 'test-agent', 'agent_name'); assert(c.options.debounce_ms == 500, 'debounce_ms'); assert(c.options.timeline_width == 42, 'default preserved'); assert(c.options.follow.enabled, 'follow enabled'); assert(c.options.highlights.follow == 'CursorLine', 'follow highlight default'); print('OK: config merge')" \
+            -c "lua local c = require('agent-lens.config'); assert(c.options.agent_name == 'test-agent', 'agent_name'); assert(c.options.debounce_ms == 500, 'debounce_ms'); assert(c.options.timeline_width == 42, 'default preserved'); assert(c.options.follow.enabled, 'follow enabled'); assert(c.options.reads.interval_ms == 100, 'reads interval'); assert(c.options.highlights.follow == 'CursorLine', 'follow highlight default'); print('OK: config merge')" \
             -c "qa!"
 
       - name: Health check runs without error
@@ -106,8 +106,16 @@ jobs:
       - name: Follow Agent navigation and safety
         run: nvim --headless -u NONE -l tests/follow.lua
 
+      - name: Follow buffer lifecycle and current-window navigation
+        run: nvim --headless -u NONE -l tests/follow_lifecycle.lua
+
+      - name: Watcher cancellation and restart safety
+        run: nvim --headless -u NONE -l tests/watcher.lua
+
       - name: Inline read and write activity
         run: nvim --headless -u NONE -l tests/inline.lua
 
-      - name: Pi extension emits metadata only
-        run: node tests/pi-read-events.test.mjs
+      - name: Pi extension package and metadata contract
+        run: |
+          npm run test:extension
+          npm pack --dry-run --json

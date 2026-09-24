@@ -38,6 +38,22 @@ function repositoryPath(root, file) {
   if (normalized === ".git" || normalized.startsWith(".git/")) return undefined;
   return normalized;
 }
+function hasSymlinkComponent(root, file) {
+  const path = relative(root, file);
+  if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+    return false;
+  }
+  let current = root;
+  for (const part of path.split(sep)) {
+    current = resolve(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 function resolveExistingFile(repo, cwd, input) {
   if (typeof input !== "string" || input === "" || input.includes("://")) return undefined;
@@ -70,6 +86,7 @@ function resolveWriteFile(repo, cwd, input) {
   if (typeof input !== "string" || input === "" || input.includes("://")) return undefined;
 
   const file = expandPath(cwd, input);
+  if (hasSymlinkComponent(repo.root, file)) return undefined;
   try {
     const stat = lstatSync(file);
     if (stat.isSymbolicLink() || !stat.isFile()) return undefined;
@@ -172,8 +189,151 @@ function editResult(details) {
   }
   return undefined;
 }
+function completeStreamEnd(value, isFinal) {
+  if (isFinal || value.endsWith("\n")) return value.length;
+  const end = value.lastIndexOf("\n");
+  return end < 0 ? 0 : end + 1;
+}
 
-function locationRecord(phase, tool, toolCallId, target) {
+function emptyStreamParser(toolName) {
+  return {
+    toolName,
+    inputLength: 0,
+    pendingLength: 0,
+    section: undefined,
+    target: undefined,
+    final: false,
+  };
+}
+
+function advanceStreamParser(toolName, input, isFinal, previous, delta) {
+  if (typeof input !== "string") return previous;
+  const appendOnly =
+    previous &&
+    previous.toolName === toolName &&
+    !previous.final &&
+    typeof delta === "string" &&
+    delta.length > 0 &&
+    input.length === previous.inputLength + delta.length &&
+    input.endsWith(delta);
+  const base = appendOnly ? previous : emptyStreamParser(toolName);
+  const start = appendOnly ? previous.inputLength - previous.pendingLength : 0;
+  const suffix = input.slice(start);
+  const completeEnd = completeStreamEnd(suffix, isFinal);
+  const chunk = suffix.slice(0, completeEnd);
+  let next = {
+    ...base,
+    inputLength: input.length,
+    pendingLength: suffix.length - completeEnd,
+    final: isFinal,
+  };
+  for (const rawLine of chunk.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (toolName === "apply_patch") {
+      const header = line.match(/^\*\*\* (?:Add|Update|Delete) File:\s*(.+?)\s*$/);
+      if (header) next = { ...next, target: { inputPath: header[1] } };
+      continue;
+    }
+
+    const header = line.match(/^\[([^\]\r\n]+)#([0-9A-F]{4})\]\s*$/);
+    if (header) {
+      next = {
+        ...next,
+        section: header[1],
+        target: { inputPath: header[1] },
+      };
+      continue;
+    }
+    if (!next.section) continue;
+    if (/^(?:REM|MV(?:\s+.+)?|PUT\s+>\$)\s*$/.test(line)) {
+      next = { ...next, target: { inputPath: next.section } };
+      continue;
+    }
+    const operation = line.match(
+      /^(?:PUT|CUT)\s+(?:(\d+)(?:\.\=\d+|\*)|>(\d+)(?::|$))/,
+    );
+    const lineNumber = positiveInteger(Number(operation?.[1] ?? operation?.[2]));
+    if (lineNumber) {
+      next = { ...next, target: { inputPath: next.section, line: lineNumber } };
+    }
+  }
+  return next;
+}
+
+function hashlineProgress(input, isFinal, previous, delta) {
+  const parser = advanceStreamParser("edit", input, isFinal, previous, delta);
+  return parser ? { target: parser.target, parser } : undefined;
+}
+
+function applyPatchProgress(input, isFinal, previous, delta) {
+  const parser = advanceStreamParser(
+    "apply_patch",
+    input,
+    isFinal,
+    previous,
+    delta,
+  );
+  return parser ? { target: parser.target, parser } : undefined;
+}
+
+function streamedToolCall(event) {
+  const assistantEvent = event?.assistantMessageEvent;
+  if (!["toolcall_delta", "toolcall_end"].includes(assistantEvent?.type)) {
+    return undefined;
+  }
+  const indexed = assistantEvent.partial?.content?.[assistantEvent.contentIndex];
+  const toolCall =
+    assistantEvent.type === "toolcall_end" ? assistantEvent.toolCall ?? indexed : indexed;
+  if (
+    !validToolCallId(toolCall?.id) ||
+    !["edit", "apply_patch"].includes(toolCall?.name)
+  ) {
+    return undefined;
+  }
+  const input = toolCall.arguments;
+  if (input != null && (typeof input !== "object" || Array.isArray(input))) {
+    return undefined;
+  }
+  return {
+    toolCallId: toolCall.id,
+    toolName: toolCall.name,
+    input: input ?? {},
+    delta: typeof assistantEvent.delta === "string" ? assistantEvent.delta : "",
+    isFinal: assistantEvent.type === "toolcall_end",
+  };
+}
+
+
+function streamedEditTarget(repo, cwd, toolCall, isFinal, previousParser) {
+  const inputPath = editInputPath(toolCall.input);
+  if (inputPath) {
+    const resolved = resolveWriteFile(repo, cwd, inputPath);
+    if (resolved) return { target: { path: resolved.path }, parser: previousParser };
+  }
+
+  const parsed =
+    toolCall.toolName === "apply_patch"
+      ? applyPatchProgress(toolCall.input.input, isFinal, previousParser, toolCall.delta)
+      : hashlineProgress(toolCall.input.input, isFinal, previousParser, toolCall.delta);
+  const parser = parsed?.parser ?? previousParser;
+  if (!parsed?.target) return { target: undefined, parser };
+  const resolved = resolveWriteFile(repo, cwd, parsed.target.inputPath);
+  if (!resolved) return { target: undefined, parser };
+  return {
+    target: {
+      path: resolved.path,
+      ...(parsed.target.line && { line: parsed.target.line }),
+    },
+    parser,
+  };
+}
+
+function sameTarget(left, right) {
+  return left?.path === right?.path && left?.line === right?.line;
+}
+
+
+function locationRecord(phase, tool, toolCallId, target, sequence) {
   return {
     v: 1,
     kind: "location",
@@ -183,14 +343,15 @@ function locationRecord(phase, tool, toolCallId, target) {
     ...(target?.path && { path: target.path }),
     agent: AGENT,
     ...(target?.line && { line: target.line }),
+    ...(phase === "progress" && positiveInteger(sequence) && { sequence }),
   };
 }
 
 export default function (pi) {
   let currentRepository;
   let pending = new Map();
+  let streaming = new Map();
   let warnedLogs = new Set();
-
   function repository(cwd) {
     if (currentRepository?.cwd === cwd) return currentRepository;
     try {
@@ -243,17 +404,89 @@ export default function (pi) {
     pending.delete(toolCallId);
     return value;
   }
+  function updateStreaming(event, ctx) {
+    const toolCall = streamedToolCall(event);
+    if (!toolCall) return;
+    const repo = repository(ctx.cwd);
+    if (!repo.root || !repo.log) return;
+
+    const current = streaming.get(toolCall.toolCallId);
+    const parsed = streamedEditTarget(
+      repo,
+      ctx.cwd,
+      toolCall,
+      toolCall.isFinal,
+      current?.parser,
+    );
+    const state = current ?? {
+      repo,
+      cwd: ctx.cwd,
+      lastTarget: undefined,
+      sequence: 0,
+      parser: parsed.parser,
+    };
+    const nextState = { ...state, parser: parsed.parser };
+    if (!parsed.target || sameTarget(state.lastTarget, parsed.target)) {
+      if (!current || nextState.parser !== current.parser) {
+        streaming = new Map(streaming);
+        streaming.set(toolCall.toolCallId, nextState);
+      }
+      return;
+    }
+
+    const next = {
+      ...nextState,
+      lastTarget: parsed.target,
+      sequence: state.sequence + 1,
+    };
+    appendEvent(
+      repo,
+      locationRecord("progress", "edit", toolCall.toolCallId, parsed.target, next.sequence),
+    );
+    streaming = new Map(streaming);
+    streaming.set(toolCall.toolCallId, next);
+  }
+
+  function forgetStreaming(toolCallId) {
+    if (!streaming.has(toolCallId)) return;
+    streaming = new Map(streaming);
+    streaming.delete(toolCallId);
+  }
+
+  function clearStreaming(emitErrors) {
+    if (emitErrors) {
+      for (const [toolCallId, call] of streaming) {
+        appendEvent(call.repo, locationRecord("error", "edit", toolCallId));
+      }
+    }
+    streaming = new Map();
+  }
+
 
   pi.on("session_start", (_event, ctx) => {
     currentRepository = undefined;
     pending = new Map();
+    streaming = new Map();
     warnedLogs = new Set();
     repository(ctx.cwd);
   });
 
+  pi.on("message_update", updateStreaming);
+
+  pi.on("message_end", (event) => {
+    if (event?.message?.role === "assistant" && event.message.stopReason !== "toolUse") {
+      clearStreaming(true);
+    }
+  });
+
+  pi.on("turn_end", () => {
+    clearStreaming(true);
+  });
+
   pi.on("tool_call", (event, ctx) => {
+    const tool = event.toolName === "apply_patch" ? "edit" : event.toolName;
     if (
-      !["read", "write", "edit"].includes(event.toolName) ||
+      !["read", "write", "edit"].includes(tool) ||
       !validToolCallId(event.toolCallId)
     ) {
       return;
@@ -277,11 +510,16 @@ export default function (pi) {
       if (!resolved) return;
       target = { path: resolved.path, line: 1 };
       inputPath = event.input.path;
-    } else if (event.toolName === "edit") {
-      inputPath = editInputPath(event.input);
-      const resolved = inputPath && resolveWriteFile(repo, ctx.cwd, inputPath);
-      if (!resolved) return;
-      target = { path: resolved.path };
+    } else if (tool === "edit") {
+      const editTarget = streamedEditTarget(
+        repo,
+        ctx.cwd,
+        { toolName: event.toolName, input: event.input },
+        true,
+      );
+      if (!editTarget.target) return;
+      inputPath = editTarget.target.path;
+      target = editTarget.target;
     } else {
       return;
     }
@@ -289,7 +527,7 @@ export default function (pi) {
     const call = {
       repo,
       cwd: ctx.cwd,
-      tool: event.toolName,
+      tool,
       inputPath,
       target,
       range,
@@ -297,8 +535,9 @@ export default function (pi) {
     remember(event.toolCallId, call);
     appendEvent(
       repo,
-      locationRecord("start", event.toolName, event.toolCallId, target),
+      locationRecord("start", tool, event.toolCallId, target),
     );
+    forgetStreaming(event.toolCallId);
   });
 
   pi.on("tool_result", (event) => {
@@ -369,6 +608,7 @@ export default function (pi) {
   pi.on("session_shutdown", () => {
     currentRepository = undefined;
     pending = new Map();
+    streaming = new Map();
     warnedLogs = new Set();
   });
 }

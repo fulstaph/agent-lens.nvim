@@ -21,7 +21,7 @@ Filesystem edits need no agent integration. Exact live locations cannot be infer
 - **Live edit timeline** — chronological feed of every file change with `+N / -M` stats
 - **Native Neovim diffs** — `diffthis` side-by-side (HEAD vs working tree) with full Tree-sitter highlighting
 - **In-buffer activity** — recent read ranges and Git `HEAD`-to-disk changed lines are marked without opening the timeline; use `:AgentLensInlineToggle` to hide/show them
-- **Follow Agent** — opt-in Zed-style navigation opens the active Pi/OMP file, marks one current location, and keeps it visible without replacing unsaved buffers
+- **Follow Agent** — opt-in Zed-style navigation opens the active Pi/OMP file, marks one current location, and labels safe streamed progress as `drafting`, execution as `applying`, and settled results as `AGENT · pi` without replacing unsaved buffers
 - **Zero agent coupling** — works with Pi, Claude Code, Codex CLI, Copilot CLI, OpenCode, Aider, or a human in another terminal
 - **Fast** — macOS uses native FSEvents recursive watching; Linux uses per-directory `inotify` via libuv; all events debounced
 - **Configurable** — panel position, diff layout, ignore patterns, keymaps, highlight groups
@@ -63,6 +63,27 @@ Filesystem edits need no agent integration. Exact live locations cannot be infer
   -- ... same keys/opts/config as above
 }
 ```
+### Pi/OMP bridge package
+
+The repository is also a dependency-free dual-host Pi/OMP package. Install it
+once, then restart the Pi or OMP session:
+
+```bash
+omp install github:fulstaph/agent-lens.nvim
+pi install git:github.com/fulstaph/agent-lens.nvim
+```
+
+For local development from this checkout:
+
+```bash
+omp install .
+pi install .
+```
+
+The manifest exposes the same `extensions/pi-read-events.js` entry through both
+`omp.extensions` and `pi.extensions`. Verify the package and bridge locally
+with `npm run test:extension`; the bridge has no runtime dependencies or
+bundled host API package.
 
 ## Usage
 
@@ -75,7 +96,7 @@ Filesystem edits need no agent integration. Exact live locations cannot be infer
 
 In-file write highlights show the current **Git `HEAD` → disk** added/modified lines, not proof that the agent authored those lines. Pure deletions get a nearby `− deleted` label. Read highlights show the **last requested range** when the tool supplies one; a read without a known range gets a file-level label instead. Marks are hidden while a buffer has unsaved local edits, and `:AgentLensClear` removes them.
 
-Follow Agent is separate from static activity marks. It maintains one current marker, does not add location events to the timeline, and never force-replaces a modified buffer. If necessary it opens a non-entered split for the followed file.
+Follow Agent is separate from static activity marks. It uses the current ordinary editor window, moves the cursor to the agent's line, and maintains one current marker. It never force-replaces a modified buffer. Pinned, cursor-bound, scroll-bound, diff, preview, and other special windows are left alone; Follow reuses another safe window in the current tab or opens a non-entered split. Toggle Follow off to navigate independently.
 
 ## Commands
 
@@ -129,7 +150,7 @@ require("agent-lens").setup({
   agent_name = "agent",          -- Display name for the agent
   reads = {
     enabled = false,            -- Opt in to Pi/OMP read-tool events
-    interval_ms = 250,          -- Read the local event log every 250 ms
+    interval_ms = 100,          -- Poll metadata every 100 ms
   },
   inline = {
     enabled = true,             -- Show latest activity in source buffers
@@ -183,8 +204,8 @@ require("agent-lens").setup({
 4. The diff is stored as a timestamped timeline entry with add/remove stats.
 5. The timeline panel renders entries newest-first with relative timestamps.
 6. Selecting an entry opens two scratch buffers (HEAD content vs working tree) in `diffthis` mode with full syntax highlighting.
-7. Open Neovim buffers auto-reload via `checktime` autocmds so you see changes live.
-8. The optional Pi/OMP bridge appends correlated metadata-only tool locations. Follow Agent opens a safe editor window, keeps exactly one marker, and ignores late completions from older parallel calls.
+7. Follow reloads unmodified target buffers from disk through Neovim's normal file readers. Other open buffers use `checktime` autocmds.
+8. The optional Pi/OMP bridge appends correlated metadata-only tool locations. Follow Agent navigates the current safe editor window and cursor, keeps exactly one marker, and ignores late completions from older parallel calls.
 
 ## Agent setup guides
 
@@ -192,7 +213,9 @@ Filesystem edits from any process appear without hooks. Successful read activity
 
 ### Pi agent / Oh My Pi (OMP)
 
-Run Pi or OMP in another terminal in the same Git repository; edits appear without hooks. For read activity and Zed-style following, opt in on both sides:
+Run Pi or OMP in another terminal in the same Git repository; filesystem
+edits appear without hooks. For read activity and Follow Agent, opt in on both
+sides:
 
 1. In your LazyVim plugin spec, opt in and restart Neovim:
    ```lua
@@ -202,20 +225,54 @@ Run Pi or OMP in another terminal in the same Git repository; edits appear witho
      follow = { enabled = true },
    }
    ```
-2. Find the plugin install path in `:Lazy` (typically `~/.local/share/nvim/lazy/agent-lens.nvim`). Start a **new** Pi or OMP session in the same Git repository with the bundled extension:
+2. Install the bridge package, then restart the Pi or OMP session:
    ```bash
-   pi --extension ~/.local/share/nvim/lazy/agent-lens.nvim/extensions/pi-read-events.js
-   # or:
-   omp --extension ~/.local/share/nvim/lazy/agent-lens.nvim/extensions/pi-read-events.js
+   omp install github:fulstaph/agent-lens.nvim
+   pi install git:github.com/fulstaph/agent-lens.nvim
    ```
-   For persistent OMP loading, add the same absolute file path under `extensions:` in `~/.omp/agent/config.yml`, or symlink the file into `~/.omp/agent/extensions/`.
-3. Trigger a built-in `read`, `edit`, or `write`. Follow Agent opens the reported file and centers the latest reliable line. Successful reads still add `READ · pi` timeline entries and static range highlights.
+   For local development from a checkout, use `omp install .` or `pi install .`.
+   The unchanged one-session fallback is:
+   ```bash
+   omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
+   # or:
+   pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
+   ```
+3. Trigger a built-in `read`, `edit`, or `write`. Follow Agent shows one
+   marker whose label moves from `drafting` to `applying` to settled
+   `AGENT · pi` as correlated lifecycle records arrive.
 
-The extension writes **only repository-relative paths, tool lifecycle IDs, tool names, phases, and optional line/range metadata** to `<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`). It never records file contents, write text, patches, prompts, tool output, absolute paths, or secrets. Neovim starts at the log's current end and never replays previous sessions. Paths outside the repository, `.git`, unsafe symlinks, and unsupported non-file targets are rejected at both producer and consumer boundaries.
+The streamed bridge reads Pi/OMP `message_update` tool-call arguments but
+emits metadata only at complete, safe file-section or hunk boundaries, never
+per token. `progress` records are edit-only and carry an optional positive
+`line` plus a monotonic `sequence` per tool call. Neovim validates phase,
+tool, sequence, line, repository containment, `.git`, and symlink safety again.
+`start` reconciles speculative metadata, and `tool_result` remains authoritative.
+Some providers expose only one complete delta, so Follow makes one jump rather
+than fabricating animation.
 
-Follow starts immediately from a normalized tool target, then refines the location after a successful result. A failed active call clears its marker; a late completion from an older parallel call cannot replace a newer location. OMP exposes one lifecycle for a multi-file edit, not per-file streaming progress, so agent-lens follows the first normalized target and then the first successful result rather than fabricating intermediate positions.
+The extension writes **only repository-relative paths, bounded lifecycle IDs,
+tool names, phases, and optional line/sequence/range metadata** to
+`<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`). It never records
+file contents, write text, patches, prompts, raw deltas, tool output, absolute
+paths, or secrets. The package uses the same bridge through both
+`omp.extensions` and `pi.extensions`; run `npm run test:extension` to verify
+the manifest and privacy contract.
 
-Remove `--extension` (or the persistent extension entry) to stop producing metadata. `reads.enabled = false` disables static read activity; `follow.enabled = false` disables automatic navigation. The local JSONL path history remains until you delete the file.
+Follow Agent refreshes source buffers only from files on disk, using Neovim's
+normal file-reading hooks. It never pastes streamed edit bodies, adds virtual
+diff lines, or overwrites unsaved buffer contents. A missing draft is not attached
+to Neovim's file-created warning; when its file appears unmodified, Follow loads
+it. If you have unsaved text, Follow keeps that draft and reports the conflict.
+Failed loads are reported rather than presented as successful empty buffers.
+
+Follow does not switch window focus, create timeline entries, or clear static
+activity marks. A failed active call clears its marker; a late completion from
+an older parallel call cannot replace a newer location.
+
+Remove the package or direct `--extension` loading to stop producing metadata.
+`reads.enabled = false` disables static read activity; `follow.enabled = false`
+disables automatic navigation. The local JSONL path history remains until you
+delete the file.
 
 ### Claude Code
 

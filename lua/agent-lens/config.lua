@@ -41,7 +41,7 @@
 ---@field agent_name? string Display name for the agent
 ---@field reads? { enabled?: boolean, interval_ms?: integer } Opt-in Pi/OMP read feed
 ---@field inline? { enabled?: boolean } Show recent activity in file buffers
----@field follow? { enabled?: boolean } Open and center the active agent location
+---@field follow? { enabled?: boolean } Navigate the current safe editor window and cursor
 
 local M = {}
 
@@ -57,7 +57,7 @@ M.defaults = {
   timeline_height = 15,
   diff_layout = "vertical",
   auto_open_diff = false,
-  reads = { enabled = false, interval_ms = 250 },
+  reads = { enabled = false, interval_ms = 100 },
   inline = { enabled = true },
   follow = { enabled = false },
   highlights = {
