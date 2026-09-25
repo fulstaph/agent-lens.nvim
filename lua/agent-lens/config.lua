@@ -7,9 +7,12 @@
 ---@field timeline_time? string Highlight group for timestamps in timeline
 ---@field timeline_agent? string Highlight group for agent name in timeline
 ---@field timeline_selected? string Highlight group for selected timeline entry
+---@field follow? string Highlight group for the active agent line
+---@field follow_label? string Highlight group for the active agent label
 
 ---@class AgentLensKeymaps
 ---@field toggle? string Toggle the timeline panel
+---@field follow? string Toggle Follow Agent
 ---@field next_edit? string Jump to next edit in timeline
 ---@field prev_edit? string Jump to previous edit in timeline
 ---@field open_diff? string Open diff for selected edit
@@ -38,6 +41,7 @@
 ---@field agent_name? string Display name for the agent
 ---@field reads? { enabled?: boolean, interval_ms?: integer } Opt-in Pi/OMP read feed
 ---@field inline? { enabled?: boolean } Show recent activity in file buffers
+---@field follow? { enabled?: boolean } Navigate the current safe editor window and cursor
 
 local M = {}
 
@@ -53,8 +57,9 @@ M.defaults = {
   timeline_height = 15,
   diff_layout = "vertical",
   auto_open_diff = false,
-  reads = { enabled = false, interval_ms = 250 },
+  reads = { enabled = false, interval_ms = 100 },
   inline = { enabled = true },
+  follow = { enabled = false },
   highlights = {
     added = "DiffAdd",
     removed = "DiffDelete",
@@ -64,9 +69,12 @@ M.defaults = {
     timeline_time = "Comment",
     timeline_agent = "Keyword",
     timeline_selected = "CursorLine",
+    follow = "CursorLine",
+    follow_label = "DiagnosticInfo",
   },
   keymaps = {
     toggle = "<leader>al",
+    follow = "<leader>af",
     next_edit = "]a",
     prev_edit = "[a",
     open_diff = "<CR>",

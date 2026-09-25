@@ -47,7 +47,7 @@ end
 ---@param watcher AgentLensWatcher
 ---@param dir string
 local function watch_dir_recursive(watcher, dir)
-  if watcher.watchers[dir] then
+  if not watcher.running or watcher.watchers[dir] then
     return
   end
 
@@ -60,7 +60,7 @@ local function watch_dir_recursive(watcher, dir)
     dir,
     { recursive = false },
     vim.schedule_wrap(function(err, filename, events)
-      if err then
+      if not watcher.running or err then
         return
       end
       if not filename then
@@ -97,6 +97,10 @@ local function watch_dir_recursive(watcher, dir)
         config.options.debounce_ms,
         0,
         vim.schedule_wrap(function()
+          -- Cancellation can race an expiry already queued on Neovim's main loop.
+          if not watcher.running or watcher._debounce_timers[full_path] ~= timer then
+            return
+          end
           timer:stop()
           timer:close()
           watcher._debounce_timers[full_path] = nil
@@ -163,7 +167,7 @@ function M.start(root, on_change)
         root,
         { recursive = true },
         vim.schedule_wrap(function(err, filename, events)
-          if err or not filename then
+          if not watcher.running or err or not filename then
             return
           end
 
@@ -189,6 +193,9 @@ function M.start(root, on_change)
             config.options.debounce_ms,
             0,
             vim.schedule_wrap(function()
+              if not watcher.running or watcher._debounce_timers[full_path] ~= timer then
+                return
+              end
               timer:stop()
               timer:close()
               watcher._debounce_timers[full_path] = nil

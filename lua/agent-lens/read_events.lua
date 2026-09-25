@@ -1,7 +1,8 @@
---- Optional Pi/OMP read events. Reads only metadata appended inside the active Git dir.
+--- Optional Pi/OMP metadata feed for successful reads and live agent locations.
 local config = require("agent-lens.config")
 local timeline = require("agent-lens.timeline")
 local inline = require("agent-lens.inline")
+local follow = require("agent-lens.follow")
 
 local M = {}
 local uv = vim.uv or vim.loop
@@ -20,7 +21,7 @@ local function git_dir(project)
   return result[1]
 end
 
-local function valid_path(path)
+local function relative_path(path)
   if type(path) ~= "string" or path == "" or path:find("[%z\1-\31]") or path:sub(1, 1) == "/" then
     return false
   end
@@ -29,43 +30,87 @@ local function valid_path(path)
       return false
     end
   end
-  if path == ".git" or path:sub(1, 5) == ".git/" then
+  return path ~= ".git" and path:sub(1, 5) ~= ".git/"
+end
+
+local function inside_project(real_root, path)
+  return path == real_root or path:sub(1, #real_root + 1) == real_root .. "/"
+end
+
+local function has_symlink_component(candidate)
+  local relative = candidate:sub(#root + 2)
+  local component = root
+  for part in relative:gmatch("[^/]+") do
+    component = component .. "/" .. part
+    local stat = uv.fs_lstat(component)
+    if stat and stat.type == "link" then
+      return true
+    end
+    if not stat then
+      return false
+    end
+  end
+  return false
+end
+
+local function valid_path(path, allow_missing)
+  if not relative_path(path) then
     return false
   end
   local real_root = uv.fs_realpath(root)
-  local resolved = uv.fs_realpath(root .. "/" .. path)
-  return real_root ~= nil
-    and resolved ~= nil
-    and resolved:sub(1, #real_root + 1) == real_root .. "/"
+  if not real_root then
+    return false
+  end
+  local candidate = root .. "/" .. path
+  if has_symlink_component(candidate) then
+    return false
+  end
+  local resolved = uv.fs_realpath(candidate)
+  if resolved then
+    local stat = uv.fs_stat(resolved)
+    return stat ~= nil and stat.type == "file" and inside_project(real_root, resolved)
+  end
+  if not allow_missing or uv.fs_lstat(candidate) then
+    return false
+  end
+
+  local ancestor = vim.fn.fnamemodify(candidate, ":h")
+  while ancestor ~= vim.fn.fnamemodify(ancestor, ":h") do
+    local real_ancestor = uv.fs_realpath(ancestor)
+    if real_ancestor then
+      return inside_project(real_root, real_ancestor)
+    end
+    ancestor = vim.fn.fnamemodify(ancestor, ":h")
+  end
+  return false
 end
 
-local function deliver(line)
-  local ok, event = pcall(vim.json.decode, line)
+local function agent_name(value)
+  return type(value) == "string" and value:match("^[%w_%-]+$") and value:sub(1, 32)
+    or config.options.agent_name
+end
+
+local function read_range(value)
   if
-    not ok
-    or type(event) ~= "table"
-    or event.v ~= 1
-    or event.kind ~= "read"
-    or not valid_path(event.path)
+    type(value) ~= "table"
+    or type(value.start) ~= "number"
+    or type(value["end"]) ~= "number"
+    or value.start % 1 ~= 0
+    or value["end"] % 1 ~= 0
+    or value.start < 1
+    or value["end"] < value.start
   then
+    return nil
+  end
+  return { start = value.start, ["end"] = value["end"] }
+end
+
+local function deliver_read(event)
+  if not valid_path(event.path, false) then
     return
   end
-  local agent = type(event.agent) == "string"
-      and event.agent:match("^[%w_%-]+$")
-      and event.agent:sub(1, 32)
-    or config.options.agent_name
-  local range = event.range
-  if
-    type(range) ~= "table"
-    or type(range.start) ~= "number"
-    or type(range["end"]) ~= "number"
-    or range.start % 1 ~= 0
-    or range["end"] % 1 ~= 0
-    or range.start < 1
-    or range["end"] < range.start
-  then
-    range = nil
-  end
+  local agent = agent_name(event.agent)
+  local range = read_range(event.range)
   timeline.add({
     rel_path = event.path,
     kind = "read",
@@ -78,6 +123,65 @@ local function deliver(line)
   local panel = require("agent-lens.panel")
   if panel.is_open() then
     panel.render()
+  end
+end
+
+local function deliver_location(event)
+  local phases = { start = true, progress = true, success = true, error = true }
+  local tools = { read = true, edit = true, write = true }
+  if
+    not phases[event.phase]
+    or not tools[event.tool]
+    or type(event.toolCallId) ~= "string"
+    or event.toolCallId == ""
+    or #event.toolCallId > 256
+  then
+    return
+  end
+  if event.phase == "progress" and event.tool ~= "edit" then
+    return
+  end
+  if event.phase == "progress" then
+    if type(event.sequence) ~= "number" or event.sequence % 1 ~= 0 or event.sequence < 1 then
+      return
+    end
+  elseif event.sequence ~= nil then
+    return
+  end
+  local line = event.line
+  if line ~= nil and (type(line) ~= "number" or line % 1 ~= 0 or line < 1) then
+    return
+  end
+  if event.phase ~= "error" then
+    local allow_missing = (event.phase == "start" and event.tool == "write")
+      or (
+        event.tool == "edit"
+        and (event.phase == "start" or event.phase == "progress" or event.phase == "success")
+      )
+    if not valid_path(event.path, allow_missing) then
+      return
+    end
+  end
+  follow.record_location(root, {
+    call_id = event.toolCallId,
+    phase = event.phase,
+    tool = event.tool,
+    path = event.phase ~= "error" and event.path or nil,
+    line = line,
+    agent = agent_name(event.agent),
+    sequence = event.sequence,
+  })
+end
+
+local function deliver(line)
+  local ok, event = pcall(vim.json.decode, line)
+  if not ok or type(event) ~= "table" or event.v ~= 1 then
+    return
+  end
+  if event.kind == "read" then
+    deliver_read(event)
+  elseif event.kind == "location" then
+    deliver_location(event)
   end
 end
 

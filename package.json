@@ -1,0 +1,23 @@
+{
+  "name": "agent-lens.nvim",
+  "version": "0.1.0",
+  "description": "Pi/OMP metadata bridge for agent-lens.nvim",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fulstaph/agent-lens.nvim.git"
+  },
+  "homepage": "https://github.com/fulstaph/agent-lens.nvim#readme",
+  "keywords": ["pi-package", "omp-extension", "neovim", "agent-lens"],
+  "files": ["extensions/pi-read-events.js", "README.md", "LICENSE"],
+  "scripts": {
+    "test:extension": "node tests/package-manifest.test.mjs && node tests/pi-read-events.test.mjs"
+  },
+  "omp": {
+    "extensions": ["./extensions/pi-read-events.js"]
+  },
+  "pi": {
+    "extensions": ["./extensions/pi-read-events.js"]
+  }
+}

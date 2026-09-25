@@ -9,6 +9,7 @@
 ---   :AgentLensStop    — Stop watching
 ---   :AgentLensClear   — Clear the timeline
 ---   :AgentLensInlineToggle — Toggle read/write marks in source buffers
+---   :AgentLensFollow  — Toggle live agent navigation
 ---   :AgentLensDiff    — Open diff for selected entry
 
 local config = require("agent-lens.config")
@@ -19,6 +20,7 @@ local panel = require("agent-lens.panel")
 local diff_view = require("agent-lens.diff_view")
 local read_events = require("agent-lens.read_events")
 local inline = require("agent-lens.inline")
+local follow = require("agent-lens.follow")
 
 local M = {}
 
@@ -84,6 +86,7 @@ local function on_file_change(rel_path, events)
     })
   else
     -- Reverted to HEAD; remove the previous write decoration.
+    follow.file_changed(M._root, rel_path)
     vim.cmd("silent! checktime")
     inline.record_write(M._root, rel_path, nil)
     return
@@ -102,7 +105,8 @@ local function on_file_change(rel_path, events)
     end
   end
 
-  -- Also trigger checktime so open buffers reload
+  -- Hydrate Follow drafts before checktime can prompt about a newly created file.
+  follow.file_changed(M._root, rel_path)
   vim.cmd("silent! checktime")
   inline.record_write(M._root, rel_path, not events.deleted and file_diff or nil)
 end
@@ -111,10 +115,13 @@ end
 ---@param root? string Project root (auto-detected from git or cwd)
 function M.start(root)
   root = root or config.options.watch_dir or diff_engine.git_root() or vim.fn.getcwd()
+  if M._root and M._root ~= root then
+    follow.clear()
+  end
   M._root = root
 
   watcher.start(root, on_file_change)
-  if config.options.reads.enabled then
+  if config.options.reads.enabled or follow.is_enabled() then
     read_events.start(root)
   end
   vim.notify(
@@ -127,6 +134,7 @@ end
 function M.stop()
   watcher.stop()
   read_events.stop()
+  follow.clear()
   M._root = nil
   vim.notify("[agent-lens] Stopped watching", vim.log.levels.INFO)
 end
@@ -137,6 +145,26 @@ function M.toggle()
     M.start()
   end
   panel.toggle()
+end
+
+--- Toggle live navigation to the active agent location.
+---@return boolean enabled
+function M.toggle_follow()
+  local active = follow.toggle()
+  if active then
+    if not watcher.is_running() then
+      M.start()
+    elseif not read_events.is_running() and M._root then
+      read_events.start(M._root)
+    end
+  elseif not config.options.reads.enabled then
+    read_events.stop()
+  end
+  vim.notify(
+    "[agent-lens] Follow Agent " .. (active and "enabled" or "disabled"),
+    vim.log.levels.INFO
+  )
+  return active
 end
 
 --- Open diff for the currently selected timeline entry.
@@ -181,6 +209,7 @@ end
 function M.clear()
   timeline.clear()
   inline.clear()
+  follow.clear()
   if panel.is_open() then
     panel.render()
   end
@@ -192,6 +221,7 @@ end
 function M.setup(opts)
   config.setup(opts)
   inline.setup(config.options.inline)
+  follow.setup(config.options.follow)
 
   -- Register user commands
   vim.api.nvim_create_user_command("AgentLens", function()
@@ -220,6 +250,9 @@ function M.setup(opts)
       vim.log.levels.INFO
     )
   end, { desc = "Toggle agent-lens activity in file buffers" })
+  vim.api.nvim_create_user_command("AgentLensFollow", function()
+    M.toggle_follow()
+  end, { desc = "Toggle agent-lens Follow Agent" })
 
   vim.api.nvim_create_user_command("AgentLensClose", function()
     M.close_all()
@@ -230,6 +263,11 @@ function M.setup(opts)
     vim.keymap.set("n", config.options.keymaps.toggle, function()
       M.toggle()
     end, { desc = "Toggle agent-lens" })
+  end
+  if config.options.keymaps.follow and config.options.keymaps.follow ~= "" then
+    vim.keymap.set("n", config.options.keymaps.follow, function()
+      M.toggle_follow()
+    end, { desc = "Toggle agent-lens Follow Agent" })
   end
 
   -- Auto-start if enabled

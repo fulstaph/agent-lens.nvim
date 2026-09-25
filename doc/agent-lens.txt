@@ -13,12 +13,14 @@ CONTENTS                                              *agent-lens-contents*
 ==============================================================================
 1. INTRODUCTION                                          *agent-lens-intro*
 
-agent-lens.nvim watches your project for file changes made by AI coding
-agents (Pi, Claude Code, Codex, etc.), highlights activity in file buffers,
-and shows an interactive timeline of edits with native Neovim diffs.
+agent-lens.nvim watches projects for file changes, highlights activity in file
+buffers, and shows an interactive timeline with native Neovim diffs. With the
+optional Pi/OMP bridge it can also follow the agent's current read, edit, or
+write location across files.
 
-Agent-agnostic: watches the filesystem via libuv and diffs against git HEAD.
-Any agent that writes files is tracked automatically.
+Filesystem watching is agent-agnostic. Follow Agent uses correlated,
+metadata-only Pi/OMP tool events because exact locations cannot be inferred
+from filesystem notifications.
 
 ==============================================================================
 2. REQUIREMENTS                                   *agent-lens-requirements*
@@ -64,10 +66,14 @@ Local development: >lua
   Stop the file watcher.
 
 :AgentLensClear                                          *:AgentLensClear*
-  Clear the timeline history and in-buffer activity marks.
+  Clear the timeline, in-buffer activity, and active follow marker.
 
 :AgentLensInlineToggle                            *:AgentLensInlineToggle*
   Hide or show read/write marks in ordinary file buffers.
+
+:AgentLensFollow                                        *:AgentLensFollow*
+  Toggle live navigation to the active Pi/OMP tool location. Follow is
+  opt-in and requires the bundled extension.
 
 :AgentLensDiff                                            *:AgentLensDiff*
   Open a diff for an edit, or the current file at the requested start line
@@ -81,6 +87,7 @@ Local development: >lua
 
 Global ~
   <leader>al    Toggle timeline panel
+  <leader>af    Toggle Follow Agent
   ]a            Next edit in timeline
   [a            Previous edit in timeline
 
@@ -96,6 +103,7 @@ Timeline buffer ~
   local lens = require("agent-lens")
   lens.setup(opts)       -- Configure and start
   lens.toggle()          -- Toggle timeline panel
+  lens.toggle_follow()   -- Toggle Follow Agent
   lens.start(root)       -- Start watcher
   lens.stop()            -- Stop watcher
   lens.show_diff()       -- Diff for selected entry
@@ -103,20 +111,52 @@ Timeline buffer ~
   lens.clear()           -- Clear timeline
 <
 
-Optional read tracking ~
-  Reads cannot be detected by filesystem notifications. To show successful
-  Pi/OMP `read` tool calls, opt in on BOTH sides:
+Optional Pi/OMP metadata ~
+  Reads and exact tool locations cannot be detected by filesystem
+  notifications. To show successful reads, follow the agent, or both:
 
-  1. Set `reads = { enabled = true }` in setup opts (default: false).
-  2. Launch a new Pi or OMP session with the bundled extension:
-     pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
-     omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
+  1. Set `reads = { enabled = true }`, `follow = { enabled = true }`, or both
+     in setup opts. Both default to false; metadata polling defaults to 100 ms.
+  2. Install the dependency-free dual-host bridge package, then restart the
+     Pi or OMP session:
+       omp install github:fulstaph/agent-lens.nvim
+       pi install git:github.com/fulstaph/agent-lens.nvim
+     For local development use `omp install .` or `pi install .`.
+  3. The one-session fallback remains:
+       pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
+       omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
 
-  The extension appends relative paths and optional requested line ranges to
-  the repository Git directory at agent-lens/reads.jsonl. No file contents
-  are recorded. The consumer polls every 250 ms (reads.interval_ms), starting
-  at end-of-file without replaying historical events. Other read tools, shell
-  reads, and failed reads are outside this feature. See README.md for details.
+  The package maps both `omp.extensions` and `pi.extensions` to the same
+  `extensions/pi-read-events.js` entry. Run `npm run test:extension` to verify
+  the manifest and bridge contract.
+
+  The extension appends repository-relative, metadata-only lifecycle records
+  to the Git directory at agent-lens/reads.jsonl. It never records contents,
+  patches, prompts, raw deltas, tool output, absolute paths, or secrets. The
+  producer and Neovim consumer both reject unsafe paths, `.git`, and symlinks.
+
+Follow Agent ~
+  Follow Agent uses the current ordinary editor window and moves its cursor to
+  the active read/edit/write line. If that would replace unsaved work in another
+  file, or the current window is pinned, cursor/scroll-bound, diff, preview, or
+  otherwise special, it reuses a safe window in the current tab or opens a
+  non-entered split. Toggle Follow off to navigate independently.
+
+  One marker tracks complete, safe file-section or hunk boundaries. The labels
+  are `AGENT · pi · drafting`, `AGENT · pi · applying`, and settled `AGENT · pi`.
+  Follow does not switch window focus, force-replace modified buffers, create
+  timeline entries, or clear static activity marks.
+
+  Progress records are edit-only, carry a positive monotonic `sequence`, and
+  are validated again by Neovim. `start` reconciles the speculative target and
+  `tool_result` remains authoritative. Some providers emit one complete delta,
+  so no intermediate animation is fabricated. Unmodified targets refresh from
+  disk through normal Neovim file-reading hooks, including unmodified drafts
+  whose files have just been created. A modified draft is kept and reported
+  rather than passed to Neovim's file-created prompt. Failed loads are reported
+  and can be retried; they do not display a successful marker on an empty
+  buffer. Follow never pastes edit bodies or overwrites unsaved contents. Late
+  completions from older calls are ignored.
 
 In-buffer activity ~
   Enabled by default (`inline = { enabled = true }`). Writes highlight the
