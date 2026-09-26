@@ -27,6 +27,34 @@ local M = {}
 ---@type string|nil Git root of the watched project
 M._root = nil
 
+local BINARY_EXTS = {
+  png = true,
+  jpg = true,
+  jpeg = true,
+  gif = true,
+  bmp = true,
+  ico = true,
+  svg = true,
+  woff = true,
+  woff2 = true,
+  ttf = true,
+  eot = true,
+  mp3 = true,
+  mp4 = true,
+  mov = true,
+  avi = true,
+  zip = true,
+  gz = true,
+  tar = true,
+  pdf = true,
+  exe = true,
+  dll = true,
+  so = true,
+  dylib = true,
+  o = true,
+  a = true,
+}
+
 --- Handle a file change event from the watcher.
 ---@param rel_path string Relative path from project root
 ---@param events table Event flags from libuv
@@ -37,34 +65,7 @@ local function on_file_change(rel_path, events)
 
   -- Skip binary files (quick heuristic: check extension)
   local ext = rel_path:match("%.([^.]+)$")
-  local binary_exts = {
-    png = true,
-    jpg = true,
-    jpeg = true,
-    gif = true,
-    bmp = true,
-    ico = true,
-    svg = true,
-    woff = true,
-    woff2 = true,
-    ttf = true,
-    eot = true,
-    mp3 = true,
-    mp4 = true,
-    mov = true,
-    avi = true,
-    zip = true,
-    gz = true,
-    tar = true,
-    pdf = true,
-    exe = true,
-    dll = true,
-    so = true,
-    dylib = true,
-    o = true,
-    a = true,
-  }
-  if ext and binary_exts[ext:lower()] then
+  if ext and BINARY_EXTS[ext:lower()] then
     return
   end
 
@@ -84,12 +85,6 @@ local function on_file_change(rel_path, events)
       stats = file_diff.stats,
       diff = file_diff,
     })
-  else
-    -- Reverted to HEAD; remove the previous write decoration.
-    follow.file_changed(M._root, rel_path)
-    vim.cmd("silent! checktime")
-    inline.record_write(M._root, rel_path, nil)
-    return
   end
 
   -- Refresh the panel if it's open

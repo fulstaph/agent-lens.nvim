@@ -7,7 +7,6 @@ local namespace = vim.api.nvim_create_namespace("agent_lens_follow")
 local enabled = false
 local target
 local active_call_id
-local follow_win
 local mark
 local warned_split = false
 
@@ -16,6 +15,18 @@ local function clear_mark()
     vim.api.nvim_buf_clear_namespace(mark.buf, namespace, 0, -1)
   end
   mark = nil
+end
+
+local function relative_path(path)
+  if type(path) ~= "string" or path == "" or path:find("[%z\1-\31]") or path:sub(1, 1) == "/" then
+    return false
+  end
+  for part in path:gmatch("[^/]+") do
+    if part == "." or part == ".." then
+      return false
+    end
+  end
+  return path ~= ".git" and path:sub(1, 5) ~= ".git/"
 end
 
 local function inside(root, path)
@@ -36,7 +47,15 @@ local function has_symlink_component(root, candidate)
   end
   return false
 end
-local function target_path(root, rel_path, allow_missing)
+--- Resolve and validate a workspace-relative file target.
+---@param root string Workspace root path
+---@param rel_path string Relative file path
+---@param allow_missing? boolean Whether to allow non-existent leaf targets
+---@return string|nil resolved Absolute path or nil if invalid/unsafe
+function M.target_path(root, rel_path, allow_missing)
+  if not relative_path(rel_path) then
+    return nil
+  end
   local candidate = root .. "/" .. rel_path
   local real_root = uv.fs_realpath(root)
   if not real_root or has_symlink_component(root, candidate) then
@@ -64,6 +83,7 @@ local function target_path(root, rel_path, allow_missing)
     ancestor = parent
   end
 end
+local target_path = M.target_path
 
 local function file_version(path)
   local stat = uv.fs_stat(path)
@@ -205,25 +225,20 @@ end
 
 local function select_window(buf)
   local current = vim.api.nvim_get_current_win()
-  local windows = vim.api.nvim_tabpage_list_wins(0)
   if is_editor_window(current, buf) then
     return current
   end
 
-  for _, win in ipairs(windows) do
-    if vim.api.nvim_win_get_buf(win) == buf and is_editor_window(win, buf) then
-      return win
+  local fallback
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if is_editor_window(win, buf) then
+      if vim.api.nvim_win_get_buf(win) == buf then
+        return win
+      end
+      fallback = fallback or win
     end
   end
-  if is_editor_window(follow_win, buf) then
-    return follow_win
-  end
-  for _, win in ipairs(windows) do
-    if win ~= current and is_editor_window(win, buf) then
-      return win
-    end
-  end
-  return create_window(buf)
+  return fallback or create_window(buf)
 end
 
 local function center_view(win, line)
@@ -286,7 +301,6 @@ local function render()
     return false
   end
   mark = { buf = buf, id = id }
-  follow_win = win
   center_view(win, line)
   return true
 end
@@ -297,7 +311,6 @@ function M.setup(opts)
   enabled = opts.enabled == true
   target = nil
   active_call_id = nil
-  follow_win = nil
   warned_split = false
 end
 
@@ -356,7 +369,6 @@ function M.record_location(root, location)
     active_call_id = nil
     target = nil
     clear_mark()
-    follow_win = nil
     return
   end
 
@@ -390,7 +402,6 @@ function M.toggle()
     render()
   else
     clear_mark()
-    follow_win = nil
   end
   return enabled
 end
@@ -403,7 +414,6 @@ end
 function M.clear()
   target = nil
   active_call_id = nil
-  follow_win = nil
   clear_mark()
 end
 

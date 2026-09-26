@@ -43,6 +43,39 @@ local function is_ignored(path, patterns)
   return false
 end
 
+local function schedule_debounce(watcher, full_path, rel_path, events)
+  if watcher._debounce_timers[full_path] then
+    watcher._debounce_timers[full_path]:stop()
+    watcher._debounce_timers[full_path]:close()
+    watcher._debounce_timers[full_path] = nil
+  end
+
+  local timer = uv.new_timer()
+  if not timer then
+    return
+  end
+  watcher._debounce_timers[full_path] = timer
+  timer:start(
+    config.options.debounce_ms,
+    0,
+    vim.schedule_wrap(function()
+      if not watcher.running or watcher._debounce_timers[full_path] ~= timer then
+        return
+      end
+      timer:stop()
+      timer:close()
+      watcher._debounce_timers[full_path] = nil
+
+      local stat = uv.fs_stat(full_path)
+      if stat and stat.type == "file" then
+        watcher._on_change(rel_path, events)
+      elseif not stat and events.rename then
+        watcher._on_change(rel_path, { rename = true, deleted = true })
+      end
+    end)
+  )
+end
+
 --- Scan a directory and attach watchers to all subdirectories.
 ---@param watcher AgentLensWatcher
 ---@param dir string
@@ -81,40 +114,7 @@ local function watch_dir_recursive(watcher, dir)
         return
       end
 
-      -- Debounce: cancel any pending timer for this file
-      if watcher._debounce_timers[full_path] then
-        watcher._debounce_timers[full_path]:stop()
-        watcher._debounce_timers[full_path]:close()
-        watcher._debounce_timers[full_path] = nil
-      end
-
-      local timer = uv.new_timer()
-      if not timer then
-        return
-      end
-      watcher._debounce_timers[full_path] = timer
-      timer:start(
-        config.options.debounce_ms,
-        0,
-        vim.schedule_wrap(function()
-          -- Cancellation can race an expiry already queued on Neovim's main loop.
-          if not watcher.running or watcher._debounce_timers[full_path] ~= timer then
-            return
-          end
-          timer:stop()
-          timer:close()
-          watcher._debounce_timers[full_path] = nil
-
-          -- Verify file still exists (not a transient temp file)
-          local final_stat = uv.fs_stat(full_path)
-          if final_stat and final_stat.type == "file" then
-            watcher._on_change(rel_path, events)
-          elseif not final_stat and events.rename then
-            -- File was deleted
-            watcher._on_change(rel_path, { rename = true, deleted = true })
-          end
-        end)
-      )
+      schedule_debounce(watcher, full_path, rel_path, events)
     end)
   )
 
@@ -177,37 +177,7 @@ function M.start(root, on_change)
 
           local full_path = root .. "/" .. filename
 
-          -- Debounce
-          if watcher._debounce_timers[full_path] then
-            watcher._debounce_timers[full_path]:stop()
-            watcher._debounce_timers[full_path]:close()
-            watcher._debounce_timers[full_path] = nil
-          end
-
-          local timer = uv.new_timer()
-          if not timer then
-            return
-          end
-          watcher._debounce_timers[full_path] = timer
-          timer:start(
-            config.options.debounce_ms,
-            0,
-            vim.schedule_wrap(function()
-              if not watcher.running or watcher._debounce_timers[full_path] ~= timer then
-                return
-              end
-              timer:stop()
-              timer:close()
-              watcher._debounce_timers[full_path] = nil
-
-              local stat = uv.fs_stat(full_path)
-              if stat and stat.type == "file" then
-                watcher._on_change(filename, events)
-              elseif not stat and events.rename then
-                watcher._on_change(filename, { rename = true, deleted = true })
-              end
-            end)
-          )
+          schedule_debounce(watcher, full_path, filename, events)
         end)
       )
 
