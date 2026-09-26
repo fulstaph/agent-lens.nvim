@@ -73,46 +73,47 @@ function M.open(entry)
     end
   end
 
-  if config.options.diff_layout == "vertical" then
-    -- Open old on the left
-    vim.cmd("edit agent-lens://placeholder | only")
-    -- Actually set the buffer
-    vim.api.nvim_set_current_buf(M._buf_old)
-    M._win_old = vim.api.nvim_get_current_win()
+  local ok, err = pcall(function()
+    if config.options.diff_layout == "vertical" then
+      -- Open old on the left
+      vim.cmd("tabnew")
+      vim.api.nvim_set_current_buf(M._buf_old)
+      M._win_old = vim.api.nvim_get_current_win()
 
-    vim.cmd("rightbelow vsplit")
-    vim.api.nvim_set_current_buf(M._buf_new)
-    M._win_new = vim.api.nvim_get_current_win()
-  else
-    vim.api.nvim_set_current_buf(M._buf_old)
-    M._win_old = vim.api.nvim_get_current_win()
+      vim.cmd("rightbelow vsplit")
+      vim.api.nvim_set_current_buf(M._buf_new)
+      M._win_new = vim.api.nvim_get_current_win()
+    else
+      vim.cmd("tabnew")
+      vim.api.nvim_set_current_buf(M._buf_old)
+      M._win_old = vim.api.nvim_get_current_win()
 
-    vim.cmd("rightbelow split")
-    vim.api.nvim_set_current_buf(M._buf_new)
-    M._win_new = vim.api.nvim_get_current_win()
+      vim.cmd("rightbelow split")
+      vim.api.nvim_set_current_buf(M._buf_new)
+      M._win_new = vim.api.nvim_get_current_win()
+    end
+
+    -- Enable Neovim's built-in diff mode on both windows
+    vim.api.nvim_set_current_win(M._win_old)
+    vim.cmd("diffthis")
+    vim.api.nvim_set_current_win(M._win_new)
+    vim.cmd("diffthis")
+
+    -- Window titles via winbar
+    vim.wo[M._win_old].winbar = " HEAD: " .. entry.rel_path
+    vim.wo[M._win_new].winbar = " Working: " .. entry.rel_path
+  end)
+
+  if not ok then
+    M.close()
+    vim.notify("[agent-lens] Failed to open diff view: " .. tostring(err), vim.log.levels.ERROR)
+    return
   end
-
-  -- Enable Neovim's built-in diff mode on both windows
-  vim.api.nvim_set_current_win(M._win_old)
-  vim.cmd("diffthis")
-  vim.api.nvim_set_current_win(M._win_new)
-  vim.cmd("diffthis")
-
-  -- Window titles via winbar
-  vim.wo[M._win_old].winbar = " HEAD: " .. entry.rel_path
-  vim.wo[M._win_new].winbar = " Working: " .. entry.rel_path
-
   -- Buffer-local keymap to close
   for _, buf in ipairs({ M._buf_old, M._buf_new }) do
     vim.keymap.set("n", config.options.keymaps.close, function()
       M.close()
     end, { buffer = buf, nowait = true, silent = true, desc = "Close diff" })
-  end
-
-  -- Re-open the timeline panel if it was open
-  if panel.is_open() then
-    -- The panel was likely closed by :only — reopen it
-    panel.open()
   end
 
   -- Focus the new content window
@@ -125,8 +126,18 @@ end
 function M.close()
   for _, win in ipairs({ M._win_old, M._win_new }) do
     if win and vim.api.nvim_win_is_valid(win) then
-      vim.cmd("diffoff")
-      vim.api.nvim_win_close(win, true)
+      local buf = vim.api.nvim_win_get_buf(win)
+      if buf == M._buf_old or buf == M._buf_new then
+        vim.api.nvim_win_call(win, function()
+          vim.cmd("silent! diffoff")
+        end)
+        vim.api.nvim_win_close(win, true)
+      end
+    end
+  end
+  for _, buf in ipairs({ M._buf_old, M._buf_new }) do
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      pcall(vim.api.nvim_buf_delete, buf, { force = true })
     end
   end
   M._win_old = nil

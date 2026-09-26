@@ -20,7 +20,7 @@ end
 ---@param rel_path string Relative path from root
 ---@return boolean
 function M.is_tracked(root, rel_path)
-  vim.fn.system({ "git", "-C", root, "ls-files", "--error-unmatch", rel_path })
+  vim.fn.system({ "git", "-C", root, "ls-files", "--error-unmatch", "--", rel_path })
   return vim.v.shell_error == 0
 end
 
@@ -29,7 +29,7 @@ end
 ---@param rel_path string Relative path from root
 ---@return string[]|nil lines Lines of the HEAD version, nil if untracked
 function M.head_contents(root, rel_path)
-  local result = vim.fn.systemlist({ "git", "-C", root, "show", "HEAD:" .. rel_path })
+  local result = vim.fn.systemlist({ "git", "-C", root, "show", "HEAD:./" .. rel_path })
   if vim.v.shell_error ~= 0 then
     return nil
   end
@@ -47,9 +47,14 @@ function M.working_contents(root, rel_path)
     return nil
   end
   local lines = {}
-  for line in io.lines(full_path) do
+  local f = io.open(full_path, "r")
+  if not f then
+    return nil
+  end
+  for line in f:lines() do
     lines[#lines + 1] = line
   end
+  f:close()
   return lines
 end
 
@@ -111,7 +116,10 @@ function M.file_diff(root, rel_path)
   local is_tracked = M.is_tracked(root, rel_path)
 
   local raw
-  if is_tracked then
+  vim.fn.system({ "git", "-C", root, "rev-parse", "--verify", "HEAD" })
+  local has_head = vim.v.shell_error == 0
+
+  if is_tracked and has_head then
     raw =
       vim.fn.systemlist({ "git", "-C", root, "diff", "--no-color", "-U3", "HEAD", "--", rel_path })
   else
@@ -124,6 +132,7 @@ function M.file_diff(root, rel_path)
       "--no-color",
       "-U3",
       "--no-index",
+      "--",
       "/dev/null",
       rel_path,
     })
@@ -169,6 +178,10 @@ end
 ---@param root string Git root
 ---@return table[] files List of {path, status, insertions, deletions}
 function M.status_summary(root)
+  vim.fn.system({ "git", "-C", root, "rev-parse", "--verify", "HEAD" })
+  if vim.v.shell_error ~= 0 then
+    return {}
+  end
   local result = vim.fn.systemlist({ "git", "-C", root, "diff", "--stat", "--numstat", "HEAD" })
   if vim.v.shell_error ~= 0 then
     return {}

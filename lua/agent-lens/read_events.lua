@@ -158,6 +158,7 @@ end
 --- Start at the current end of the log; historical reads are not replayed.
 ---@param project string Absolute Git project root
 function M.start(project)
+  warned_open = false
   M.stop()
   local dir = git_dir(project)
   if not dir then

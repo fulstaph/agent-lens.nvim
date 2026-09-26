@@ -93,10 +93,15 @@ local function watch_dir_recursive(watcher, dir)
     dir,
     { recursive = false },
     vim.schedule_wrap(function(err, filename, events)
-      if not watcher.running or err then
-        return
-      end
-      if not filename then
+      if not watcher.running or err or not filename then
+        local h = watcher.watchers[dir]
+        if h then
+          if not h:is_closing() then
+            h:stop()
+            h:close()
+          end
+          watcher.watchers[dir] = nil
+        end
         return
       end
 
@@ -168,6 +173,14 @@ function M.start(root, on_change)
         { recursive = true },
         vim.schedule_wrap(function(err, filename, events)
           if not watcher.running or err or not filename then
+            local h = watcher.watchers[root]
+            if h then
+              if not h:is_closing() then
+                h:stop()
+                h:close()
+              end
+              watcher.watchers[root] = nil
+            end
             return
           end
 
