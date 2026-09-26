@@ -112,6 +112,8 @@ function M.start(root)
   root = root or config.options.watch_dir or diff_engine.git_root() or vim.fn.getcwd()
   if M._root and M._root ~= root then
     follow.clear()
+    timeline.clear()
+    inline.clear()
   end
   M._root = root
 

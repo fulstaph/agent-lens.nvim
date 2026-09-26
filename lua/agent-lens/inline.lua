@@ -129,14 +129,14 @@ function M.record_read(root, rel_path, range, agent)
   if not path then
     return
   end
-  reads = vim.tbl_extend("force", {}, reads, { [path] = { range = range, agent = agent } })
+  reads[path] = { range = range, agent = agent }
   render_file(path)
 end
 
 function M.record_write(root, rel_path, diff)
   local path = uv.fs_realpath(root .. "/" .. rel_path)
     or ((uv.fs_realpath(root) or root) .. "/" .. rel_path)
-  writes = vim.tbl_extend("force", {}, writes, { [path] = diff and changed_lines(diff) or false })
+  writes[path] = diff and changed_lines(diff) or false
   render_file(path)
 end
 

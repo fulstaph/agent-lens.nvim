@@ -250,7 +250,9 @@ end
 --- Close the timeline panel.
 function M.close()
   if M._win and vim.api.nvim_win_is_valid(M._win) then
-    vim.api.nvim_win_close(M._win, true)
+    if vim.api.nvim_win_get_buf(M._win) == M._buf then
+      vim.api.nvim_win_close(M._win, true)
+    end
   end
   M._win = nil
   M._buf = nil
