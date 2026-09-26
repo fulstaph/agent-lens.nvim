@@ -20,7 +20,7 @@ M.entries = {}
 ---@type integer
 M._next_id = 1
 
----@type table<string, integer> Map from rel_path to most recent entry id
+---@type table<string, TimelineEntry> Map from rel_path to most recent entry
 M._path_index = {}
 
 --- Add a new entry to the timeline.
@@ -42,13 +42,13 @@ function M.add(entry_data)
   -- Trim old entries if over the limit
   while #M.entries >= config.options.max_timeline_entries do
     local removed = table.remove(M.entries, 1)
-    if M._path_index[removed.rel_path] == removed.id then
+    if M._path_index[removed.rel_path] == removed then
       M._path_index[removed.rel_path] = nil
     end
   end
 
   M.entries[#M.entries + 1] = entry
-  M._path_index[entry.rel_path] = entry.id
+  M._path_index[entry.rel_path] = entry
 
   return entry
 end
@@ -67,16 +67,7 @@ end
 ---@param rel_path string
 ---@return TimelineEntry|nil
 function M.latest_for_path(rel_path)
-  local target_id = M._path_index[rel_path]
-  if not target_id then
-    return nil
-  end
-  for i = #M.entries, 1, -1 do
-    if M.entries[i].id == target_id then
-      return M.entries[i]
-    end
-  end
-  return nil
+  return M._path_index[rel_path]
 end
 
 --- Get entry by ID.

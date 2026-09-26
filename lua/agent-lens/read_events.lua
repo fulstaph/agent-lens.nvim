@@ -21,68 +21,8 @@ local function git_dir(project)
   return result[1]
 end
 
-local function relative_path(path)
-  if type(path) ~= "string" or path == "" or path:find("[%z\1-\31]") or path:sub(1, 1) == "/" then
-    return false
-  end
-  for part in path:gmatch("[^/]+") do
-    if part == "." or part == ".." then
-      return false
-    end
-  end
-  return path ~= ".git" and path:sub(1, 5) ~= ".git/"
-end
-
-local function inside_project(real_root, path)
-  return path == real_root or path:sub(1, #real_root + 1) == real_root .. "/"
-end
-
-local function has_symlink_component(candidate)
-  local relative = candidate:sub(#root + 2)
-  local component = root
-  for part in relative:gmatch("[^/]+") do
-    component = component .. "/" .. part
-    local stat = uv.fs_lstat(component)
-    if stat and stat.type == "link" then
-      return true
-    end
-    if not stat then
-      return false
-    end
-  end
-  return false
-end
-
 local function valid_path(path, allow_missing)
-  if not relative_path(path) then
-    return false
-  end
-  local real_root = uv.fs_realpath(root)
-  if not real_root then
-    return false
-  end
-  local candidate = root .. "/" .. path
-  if has_symlink_component(candidate) then
-    return false
-  end
-  local resolved = uv.fs_realpath(candidate)
-  if resolved then
-    local stat = uv.fs_stat(resolved)
-    return stat ~= nil and stat.type == "file" and inside_project(real_root, resolved)
-  end
-  if not allow_missing or uv.fs_lstat(candidate) then
-    return false
-  end
-
-  local ancestor = vim.fn.fnamemodify(candidate, ":h")
-  while ancestor ~= vim.fn.fnamemodify(ancestor, ":h") do
-    local real_ancestor = uv.fs_realpath(ancestor)
-    if real_ancestor then
-      return inside_project(real_root, real_ancestor)
-    end
-    ancestor = vim.fn.fnamemodify(ancestor, ":h")
-  end
-  return false
+  return follow.target_path(root, path, allow_missing) ~= nil
 end
 
 local function agent_name(value)
