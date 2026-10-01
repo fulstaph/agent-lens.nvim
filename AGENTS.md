@@ -114,6 +114,7 @@ The metadata path, follow projection, in-buffer overlays, and installable
 bridge package have behavioral tests:
 
 ```bash
+nvim --headless -u NONE -l tests/review_diff.lua
 nvim --headless -u NONE -l tests/timeline_panel.lua
 nvim --headless -u NONE -l tests/follow_split.lua
 nvim --headless -u NONE -l tests/follow_controls.lua
@@ -173,3 +174,7 @@ user-repurposed window. Inactive tabs retain current controller state only.
 Timeline IDs remain monotonic across clear. Ranges are copied; unread IDs and
 acknowledgements are bounded by retained entries. Panel rows identify file:path
 or event:id; action callbacks acknowledge only on a true return value.
+
+`diff.review(root,path)` returns FileDiff or nil/error for a current safe
+comparison. `changed_files(root)` sorts/deduplicates literal NUL-delimited Git
+paths, including deleted/untracked targets. Missing HEAD is unavailable.

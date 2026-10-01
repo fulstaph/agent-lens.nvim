@@ -240,3 +240,13 @@ read range); p previews when available. Incoming activity preserves selection
 and screen position. Opening successfully acknowledges matching IDs; scrolling
 does not. +N/-M totals describe latest retained HEAD-to-disk comparisons per
 file, never summed snapshots or an agent-only repository total.
+
+Review comparisons
+------------------
+Reviews recompute current HEAD-to-disk text for the watched repository; an old
+event does not retain a historical patch. Partial line removal is modified;
+missing tracked files are deleted; untracked and newly added files are added.
+Renames appear as separate old/new paths. Binary, unsafe, unchanged and missing
+HEAD comparisons give a useful message. Create the first commit to establish
+a HEAD baseline. Paths are validated again and Git paths use literal, NUL
+delimited enumeration, including spaces, Unicode, percent and flag-like names.
