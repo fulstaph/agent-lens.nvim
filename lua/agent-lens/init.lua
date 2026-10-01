@@ -199,8 +199,8 @@ function M.set_follow_window(mode)
 end
 
 --- Open diff for the currently selected timeline entry.
-function M.show_diff()
-  local entry = panel.selected()
+function M.show_diff(entry)
+  entry = entry or panel.selected()
   if not entry then
     vim.notify("[agent-lens] No entry selected", vim.log.levels.INFO)
     return
@@ -256,6 +256,24 @@ function M.setup(opts)
   config.setup(opts)
   inline.setup(config.options.inline)
   follow.setup(config.options.follow)
+  panel.setup(config.options.timeline)
+  panel.set_actions({
+    open = M.show_diff,
+    browse = function()
+      if follow.state().window == "current" then
+        follow.pause("timeline")
+      end
+    end,
+  })
+  vim.api.nvim_create_user_command("AgentLensFilter", function(cmd)
+    panel.set_filter(cmd.args ~= "" and cmd.args or nil)
+  end, {
+    nargs = "?",
+    complete = function()
+      return { "all", "reads", "edits" }
+    end,
+    desc = "Filter retained activity",
+  })
 
   vim.api.nvim_create_user_command(
     "AgentLensPause",

@@ -56,6 +56,7 @@ M.defaults = {
   timeline_position = "right",
   timeline_width = 42,
   timeline_height = 15,
+  timeline = { view = "files", filter = "all" },
   diff_layout = "vertical",
   auto_open_diff = false,
   reads = { enabled = false, interval_ms = 100 },

@@ -15,6 +15,7 @@ lua/agent-lens/
 ├── watcher.lua     — libuv fs_event file watcher (recursive FSEvents on macOS, per-dir inotify on Linux)
 ├── diff.lua        — Git diff engine: HEAD vs working tree, hunk parsing
 ├── timeline.lua    — Ordered edit feed data model (add, list, clear, summary)
+├── panel_model.lua — Pure grouping/filtering and stable row identities
 ├── panel.lua       — Timeline sidebar UI (split window, j/k nav, highlights)
 ├── diff_view.lua   — Side-by-side edit diff viewer
 ├── read_events.lua — JSONL trust boundary for Pi/OMP reads and locations
@@ -113,6 +114,7 @@ The metadata path, follow projection, in-buffer overlays, and installable
 bridge package have behavioral tests:
 
 ```bash
+nvim --headless -u NONE -l tests/timeline_panel.lua
 nvim --headless -u NONE -l tests/follow_split.lua
 nvim --headless -u NONE -l tests/follow_controls.lua
 nvim --headless -u NONE -l tests/status.lua
@@ -167,3 +169,7 @@ Input uses vim.on_key provenance; cursor autocmds alone never imply user input.
 
 Follow split ownership is window/buffer/tab-specific; teardown preserves any
 user-repurposed window. Inactive tabs retain current controller state only.
+
+Timeline IDs remain monotonic across clear. Ranges are copied; unread IDs and
+acknowledgements are bounded by retained entries. Panel rows identify file:path
+or event:id; action callbacks acknowledge only on a true return value.

@@ -398,3 +398,14 @@ width; position can be left and positive widths clamp to the editor. Closing
 or reusing the split pauses; only resume/mode actions recreate it. Inactive
 tabs freeze and a still-following split catches up on return. Customizing its
 winbar stops Agent Lens from replacing that winbar.
+
+Grouped timeline
+----------------
+Default timeline={view="files",filter="all"}; view="events" keeps a flat feed.
+Tab expands files; g switches views; f / :AgentLensFilter [all|reads|edits]
+changes the filter; u shows new activity; m marks retained events seen. j/k
+and ]a/[a navigate; CR opens the latest edit in a group (otherwise its latest
+read range); p previews when available. Incoming activity preserves selection
+and screen position. Opening successfully acknowledges matching IDs; scrolling
+does not. +N/-M totals describe latest retained HEAD-to-disk comparisons per
+file, never summed snapshots or an agent-only repository total.
