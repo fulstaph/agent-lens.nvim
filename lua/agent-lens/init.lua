@@ -22,6 +22,7 @@ local read_events = require("agent-lens.read_events")
 local inline = require("agent-lens.inline")
 local follow = require("agent-lens.follow")
 local live = require("agent-lens.live")
+local keymaps = require("agent-lens.keymaps")
 
 local status = require("agent-lens.status")
 local M = {}
@@ -62,21 +63,21 @@ local BINARY_EXTS = {
 --- Record one computed change in the timeline and editor views.
 ---@param root string
 ---@param change {rel_path: string, events: table}
----@param file_diff FileDiff|nil
-local function apply_change(root, change, file_diff)
+---@param snapshot ReviewSnapshot|nil
+local function apply_change(root, change, snapshot)
   local rel_path, events = change.rel_path, change.events
-  if events.deleted then
-    timeline.add({
-      rel_path = rel_path,
-      status = "deleted",
-      stats = { added = 0, removed = 0 },
-    })
-  elseif file_diff then
+  local file_diff = snapshot and snapshot.comparison
+  if file_diff then
     timeline.add({
       rel_path = rel_path,
       status = file_diff.status,
       stats = file_diff.stats,
-      diff = file_diff,
+    })
+  elseif events.deleted then
+    timeline.add({
+      rel_path = rel_path,
+      status = "deleted",
+      stats = { added = 0, removed = 0 },
     })
   end
 
@@ -89,14 +90,35 @@ local function apply_change(root, change, file_diff)
   if config.options.auto_open_diff and file_diff then
     local latest = timeline.entries[#timeline.entries]
     if latest then
-      M.show_diff(latest)
+      if follow.state().window == "current" then
+        follow.pause("review")
+      end
+      diff_view.open(latest, { root = root, snapshot = snapshot })
     end
   end
 
   -- Hydrate Follow drafts before checktime can prompt about a newly created file.
   follow.file_changed(root, rel_path)
   vim.cmd("silent! checktime")
-  inline.record_write(root, rel_path, not events.deleted and file_diff or nil)
+  inline.record_write(root, rel_path, file_diff)
+end
+
+--- Fetch review data inside the diff coroutine; rendering must not wait on Git.
+---@param root string
+---@param path string
+---@return ReviewSnapshot|nil
+local function compute_change(root, path)
+  local comparison = diff_engine.review(root, path)
+  if not comparison then
+    return nil
+  end
+  local auto_open = config.options.auto_open_diff
+  return {
+    root = root,
+    comparison = comparison,
+    head = auto_open and diff_engine.head_contents(root, path) or {},
+    disk = auto_open and diff_engine.working_contents(root, path) or {},
+  }
 end
 
 -- Watcher changes are diffed one at a time, in arrival order, without blocking
@@ -135,11 +157,11 @@ local function drain_changes()
       if ignored and ignored[change.rel_path] then
         return next_change()
       end
-      diff_engine.async(diff_engine.review, function(file_diff)
+      diff_engine.async(compute_change, function(snapshot)
         if epoch ~= change_epoch then
           return
         end
-        local ok, err = pcall(apply_change, root, change, file_diff)
+        local ok, err = pcall(apply_change, root, change, snapshot)
         if not ok then
           vim.notify("[agent-lens] Cannot record change: " .. tostring(err), vim.log.levels.ERROR)
         end
@@ -177,9 +199,16 @@ end
 
 --- Start watching the project for file changes.
 ---@param root? string Project root (auto-detected from git or cwd)
+---@return boolean started
 function M.start(root)
   root = root or config.options.watch_dir or diff_engine.git_root() or vim.fn.getcwd()
-  root = vim.uv.fs_realpath(root) or root
+  local real = type(root) == "string" and vim.uv.fs_realpath(root)
+  local stat = real and vim.uv.fs_stat(real)
+  if not stat or stat.type ~= "directory" then
+    vim.notify("[agent-lens] Watch directory unavailable: " .. tostring(root), vim.log.levels.ERROR)
+    return false
+  end
+  root = real
   if history_root and history_root ~= root then
     follow.clear()
     timeline.clear()
@@ -203,6 +232,13 @@ function M.start(root)
     end,
   })
   status.set("watcher", { state = watcher.is_running() and "running" or "stopped", root = root })
+  if not watcher.is_running() then
+    M._root = nil
+    read_events.stop()
+    live.stop()
+    vim.notify("[agent-lens] Cannot start file watcher", vim.log.levels.ERROR)
+    return false
+  end
   if config.options.reads.enabled or follow.is_enabled() then
     read_events.start(root)
   end
@@ -211,6 +247,7 @@ function M.start(root)
     string.format("[agent-lens] Watching %s", vim.fn.fnamemodify(root, ":~")),
     vim.log.levels.INFO
   )
+  return true
 end
 
 --- Stop watching.
@@ -222,7 +259,7 @@ function M.stop()
   read_events.stop()
   follow.stop()
   M._root = nil
-  status.set("watcher", { state = "stopped" })
+  status.set("watcher", { state = "stopped", root = history_root })
   vim.notify("[agent-lens] Stopped watching", vim.log.levels.INFO)
 end
 
@@ -294,6 +331,9 @@ local function pause_for_review()
     follow.pause("review")
   end
 end
+local function review_root()
+  return M._root or read_events.root() or history_root or diff_engine.git_root()
+end
 local function selected_or_current(entry)
   if entry then
     return entry
@@ -301,7 +341,7 @@ local function selected_or_current(entry)
   if panel.is_open() then
     return panel.selected()
   end
-  local root = M._root or read_events.root() or diff_engine.git_root()
+  local root = review_root()
   local path = vim.api.nvim_buf_get_name(0)
   local real = root and vim.uv.fs_realpath(root)
   if real and path:sub(1, #real + 1) == real .. "/" then
@@ -366,7 +406,7 @@ local function open_entry(entry, method, missing_message)
     return false
   end
   pause_for_review()
-  local root = M._root or read_events.root() or diff_engine.git_root()
+  local root = review_root()
   if entry.kind == "read" then
     return open_read(entry, root)
   end
@@ -420,6 +460,8 @@ function M.setup(opts)
   status.close()
   live.stop()
   status.reset()
+  status.set("watcher", { state = "stopped", root = history_root })
+  keymaps.clear()
   config.setup(opts)
   inline.setup(config.options.inline)
   follow.setup(config.options.follow)
@@ -454,12 +496,7 @@ function M.setup(opts)
     { desc = "Resume Follow Agent" }
   )
   if config.options.keymaps.resume and config.options.keymaps.resume ~= "" then
-    vim.keymap.set(
-      "n",
-      config.options.keymaps.resume,
-      M.resume_follow,
-      { desc = "Resume Follow Agent" }
-    )
+    keymaps.set(config.options.keymaps.resume, M.resume_follow, { desc = "Resume Follow Agent" })
   end
   vim.api.nvim_create_user_command("AgentLensFollowMode", function(cmd)
     local mode = cmd.args ~= "" and cmd.args
@@ -502,12 +539,12 @@ function M.setup(opts)
 
   -- Register global keymaps
   if config.options.keymaps.toggle and config.options.keymaps.toggle ~= "" then
-    vim.keymap.set("n", config.options.keymaps.toggle, function()
+    keymaps.set(config.options.keymaps.toggle, function()
       M.toggle()
     end, { desc = "Toggle agent-lens" })
   end
   if config.options.keymaps.follow and config.options.keymaps.follow ~= "" then
-    vim.keymap.set("n", config.options.keymaps.follow, function()
+    keymaps.set(config.options.keymaps.follow, function()
       M.toggle_follow()
     end, { desc = "Toggle agent-lens Follow Agent" })
   end

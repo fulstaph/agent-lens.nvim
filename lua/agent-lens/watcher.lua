@@ -28,6 +28,10 @@ local function remove_watcher(watcher, dir)
     handle:close()
   end
   watcher.watchers[dir] = nil
+  if M._instance == watcher and watcher.running and not next(watcher.watchers) then
+    M.stop()
+    require("agent-lens.status").set("watcher", { state = "stopped", root = watcher.root })
+  end
 end
 
 local compiled_globs = {}
@@ -272,6 +276,7 @@ function M.start(root, on_change, opts)
   end
 
   M._instance = watcher
+  watcher.running = next(watcher.watchers) ~= nil
   return watcher
 end
 
@@ -302,7 +307,7 @@ end
 --- Check if the watcher is currently running.
 ---@return boolean
 function M.is_running()
-  return M._instance ~= nil and M._instance.running
+  return M._instance ~= nil and M._instance.running and next(M._instance.watchers) ~= nil
 end
 
 return M

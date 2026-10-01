@@ -141,6 +141,8 @@ Full comparison ~
   paths in deterministic order. Binary files are skipped with a message.
   When watching a Git subdirectory, paths stay relative to that watched root
   and navigation only includes files inside it.
+  Pi/OMP metadata and previews are restricted to that directory and rebased to
+  its relative paths. Stop retains the review root even when cwd changes.
   R refreshes; q/Esc closes owned windows and returns to the origin. Navigation
   clamps at ends. Streaming writes never change the user's chosen file/hunk.
 
@@ -235,9 +237,9 @@ Defaults (partial nested opts merge with these):
       close = 'q', refresh = 'R',
     },
     highlights = {
-      added = 'DiffAdd', removed = 'DiffDelete', changed = 'DiffChange',
+      added = 'DiffAdd', removed = 'DiffDelete',
       header = 'Title', timeline_file = 'Directory', timeline_time = 'Comment',
-      timeline_agent = 'Keyword', timeline_selected = 'CursorLine',
+      timeline_selected = 'CursorLine',
       follow = 'CursorLine', follow_label = 'DiagnosticInfo',
       follow_cursor = 'DiagnosticInfo',
     },
@@ -262,7 +264,7 @@ or patched font; status/text labels remain readable without color.
 >lua
   local lens = require('agent-lens')
   lens.setup(opts)
-  lens.start(root)
+  lens.start(root)             -- boolean; false when directory/watcher unavailable
   lens.stop()
   lens.toggle()
   lens.toggle_follow()          -- boolean enabled (paused is enabled)
@@ -276,6 +278,14 @@ or patched font; status/text labels remain readable without color.
   lens.clear()
   lens.close_all()
 <
+Re-running setup removes disabled/moved plugin mappings, preserving user
+replacements. Empty strings and false disable bindings. Invalid watch_dir values
+and ignore lists warn once and fall back to defaults.
+
+Compatibility helpers for integrations remain available in agent-lens.diff
+(file_diff, status_summary) and agent-lens.timeline (latest_for_path,
+latest_edit_for_path). Timeline entries retain metadata/stats, not diff bodies.
+
 
 ==============================================================================
 9. BRIDGE AND PRIVACY                                  *agent-lens-bridge*

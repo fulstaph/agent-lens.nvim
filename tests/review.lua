@@ -22,13 +22,13 @@ local ok, err = xpcall(function()
     lines[i] = "line " .. i
   end
   vim.fn.writefile(lines, root .. "/a.lua")
-  vim.fn.writefile({ "old" }, root .. "/b.lua")
+  vim.fn.writefile({ "old" }, root .. "/b.py")
   git("add", ".")
   git("commit", "-m", "init")
   lines[2] = "NEW FIRST"
   lines[25] = "NEW LAST"
   vim.fn.writefile(lines, root .. "/a.lua")
-  vim.fn.writefile({ "new" }, root .. "/b.lua")
+  vim.fn.writefile({ "new" }, root .. "/b.py")
   vim.cmd("edit " .. vim.fn.fnameescape(root .. "/a.lua"))
   local origin = vim.api.nvim_get_current_win()
   local tab = vim.api.nvim_get_current_tabpage()
@@ -43,9 +43,6 @@ local ok, err = xpcall(function()
   local entry = {
     rel_path = "a.lua",
     status = "modified",
-    diff_cached = {
-      hunks = { { lines = { "STALE" } } },
-    },
   }
   assert(review.preview(entry, { root = root }), "hunk_preview_and_refresh")
   assert(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("NEW FIRST", 1, true))
@@ -62,7 +59,14 @@ local ok, err = xpcall(function()
   assert(vim.api.nvim_get_current_tabpage() ~= tab)
   assert(#vim.api.nvim_tabpage_list_wins(tab) == 2, "review_preserves_original_layout")
   assert(review.navigate_file(1))
-  assert(vim.wo.winbar:find("b.lua", 1, true))
+  assert(vim.wo.winbar:find("b.py", 1, true))
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    assert(vim.bo[buf].filetype == "python", "navigation updates syntax in both panes")
+    assert(vim.api.nvim_buf_get_name(buf):match("/b%.py$"), "navigation updates buffer names")
+  end
+  assert(review.open(entry, { root = root }), "reuse a full review for another file")
+  assert(vim.bo.filetype == "lua" and vim.api.nvim_buf_get_name(0):match("/a%.lua$"))
   review.close()
   assert(vim.api.nvim_get_current_win() == origin and vim.deep_equal(before, vim.fn.winsaveview()))
   assert(
@@ -84,14 +88,14 @@ local ok, err = xpcall(function()
     assert(vim.deep_equal(sides.disk, { "new text" }), "added file disk pane")
     review.close()
   end
-  vim.fn.delete(root .. "/b.lua")
-  assert(review.open({ rel_path = "b.lua" }, { root = root }))
+  vim.fn.delete(root .. "/b.py")
+  assert(review.open({ rel_path = "b.py" }, { root = root }))
   assert(
     vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "" }),
     "deleted disk pane empty"
   )
   review.close()
-  vim.fn.writefile({ "new" }, root .. "/b.lua")
+  vim.fn.writefile({ "new" }, root .. "/b.py")
   assert(review.open(entry, { root = root }))
   local reused = vim.api.nvim_get_current_win()
   local user = vim.api.nvim_create_buf(true, false)

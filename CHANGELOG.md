@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Keep retained reviews bound to the watched root after stop and working-directory changes.
+- Rebase Pi/OMP metadata and live previews for subdirectory watches; ignore targets outside the watched directory and discover sockets using the repository root.
+- Auto-open reviews consume asynchronously fetched comparisons and contents; filesystem callbacks never recompute Git synchronously.
+- Preserve deleted-file line totals and update review buffer names/filetypes during navigation.
+- Report failed watchers as stopped and validate optional watch directories and ignore-list entries.
+- Remove disabled/moved mappings on reconfiguration while preserving user replacements.
+- Drop unused timeline diff caches and the inactive `highlights.changed`/`highlights.timeline_agent` options; keep documented integration compatibility helpers.
+- Replace inline CI smoke commands with headless Lua tests that return nonzero on failure; fix the stale watcher-test option.
 - Respect Git ignore rules: ignored files never reach the timeline, and Linux skips watching ignored directories.
 - Linux: report files created inside new directories before their watcher attaches; new-directory ignore lookups never block.
 - Compute watcher diffs asynchronously, one file at a time in arrival order, so Git never blocks editing.

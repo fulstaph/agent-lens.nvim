@@ -5,7 +5,7 @@ local native_uv = vim.uv
 local native_schedule = vim.schedule
 local native_jit = jit
 local failures = {}
-config.setup({ enabled = false, debounce_ms = 5, filter = { ignore = {} } })
+config.setup({ enabled = false, debounce_ms = 5, filter = { ignore_patterns = {} } })
 
 -- Control the libuv-to-main-loop boundary; file reads and directory scans stay real.
 local function fixture(platform, run)
@@ -93,6 +93,12 @@ local function fixture(platform, run)
 end
 
 local cases = {
+  lost_last_handle = function(ctx)
+    ctx.emit(ctx.root, nil)
+    ctx.drain()
+    assert(not ctx.watcher.is_running(), "losing the last watch handle stops the watcher")
+    assert(require("agent-lens.status").get().watcher.state == "stopped")
+  end,
   replaced_expiry = function(ctx)
     ctx.emit(ctx.root, "source.txt")
     ctx.flush()

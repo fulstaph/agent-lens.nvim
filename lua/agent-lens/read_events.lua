@@ -3,6 +3,8 @@ local config = require("agent-lens.config")
 local timeline = require("agent-lens.timeline")
 local inline = require("agent-lens.inline")
 local follow = require("agent-lens.follow")
+local paths = require("agent-lens.paths")
+local diff = require("agent-lens.diff")
 
 local status = require("agent-lens.status")
 local generation = 0
@@ -11,6 +13,7 @@ local uv = vim.uv
 local timer
 local log_path
 local root
+local repository_root
 local offset = 0
 local warned_open = false
 local MAX_CHUNK = 65536
@@ -45,21 +48,22 @@ local function read_range(value)
 end
 
 local function deliver_read(event)
-  if follow.target_path(root, event.path, false) == nil then
+  local path = paths.rebase(root, repository_root, event.path, false)
+  if not path then
     return
   end
   status.set("metadata", { state = "received", last_valid_at = os.time() })
   local agent = agent_name(event.agent)
   local range = read_range(event.range)
   timeline.add({
-    rel_path = event.path,
+    rel_path = path,
     kind = "read",
     status = "read",
     stats = { added = 0, removed = 0 },
     agent = agent,
     range = range,
   })
-  inline.record_read(root, event.path, range, agent)
+  inline.record_read(root, path, range, agent)
   local panel = require("agent-lens.panel")
   if panel.is_open() then
     panel.render()
@@ -92,13 +96,15 @@ local function deliver_location(event)
   if line ~= nil and (type(line) ~= "number" or line % 1 ~= 0 or line < 1) then
     return
   end
+  local path
   if event.phase ~= "error" then
     local allow_missing = (event.phase == "start" and event.tool == "write")
       or (
         event.tool == "edit"
         and (event.phase == "start" or event.phase == "progress" or event.phase == "success")
       )
-    if follow.target_path(root, event.path, allow_missing) == nil then
+    path = paths.rebase(root, repository_root, event.path, allow_missing)
+    if not path then
       return
     end
   end
@@ -107,7 +113,7 @@ local function deliver_location(event)
     call_id = event.toolCallId,
     phase = event.phase,
     tool = event.tool,
-    path = event.phase ~= "error" and event.path or nil,
+    path = path,
     line = line,
     agent = agent_name(event.agent),
     sequence = event.sequence,
@@ -163,7 +169,9 @@ function M.start(project)
   warned_open = false
   M.stop()
   local dir = git_dir(project)
-  if not dir then
+  repository_root = diff.git_root(project)
+  if not dir or not repository_root then
+    repository_root = nil
     status.set("metadata", { state = "error", error = "Git repository unavailable" })
     vim.notify("[agent-lens] Read tracking requires a Git repository", vim.log.levels.WARN)
     return
@@ -177,6 +185,7 @@ function M.start(project)
   if not timer then
     log_path = nil
     root = nil
+    repository_root = nil
     vim.notify("[agent-lens] Could not start read tracking timer", vim.log.levels.ERROR)
     return
   end
@@ -204,6 +213,7 @@ function M.stop()
   end
   log_path = nil
   root = nil
+  repository_root = nil
   offset = 0
   warned_open = false
 end

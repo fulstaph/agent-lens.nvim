@@ -22,6 +22,7 @@ lua/agent-lens/
 ├── inline.lua      — Persistent read-range/write-line extmarks
 ├── status.lua      — Copied observable metadata and details UI
 ├── paths.lua       — Shared repository-relative file validation
+├── keymaps.lua     — Owned normal-mode mappings and safe reconfiguration
 ├── follow_view.lua — Source/draft lifecycle, input provenance and safe rendering
 ├── follow.lua      — Control/activity, correlation, latest pending snapshot
 ├── live.lua        — Private local-socket receiver for transient code previews
@@ -80,7 +81,7 @@ Pi/OMP streamed edit/write arguments → transient local socket
 ### Key types
 
 - `AgentLensOpts` — full config schema (see `config.lua`)
-- `TimelineEntry` — `{id, timestamp, rel_path, status, kind?, stats, agent, range?, diff_cached}`; `kind="read"` has no diff
+- `TimelineEntry` — `{id, timestamp, rel_path, status, kind?, stats, agent, range?}`; entries retain metadata, not diff bodies
 - `FileDiff` — `{rel_path, status, hunks[], stats, raw}`
 - `DiffHunk` — `{old_start, old_count, new_start, new_count, header, lines[]}`
 - `AgentLocation` — `{call_id, phase, tool, path?, line?, agent, sequence?}` normalized by `read_events.lua`; `progress` is edit-only and sequence-bearing
@@ -106,7 +107,9 @@ Pi/OMP streamed edit/write arguments → transient local socket
   `panel_model` row keys are file:path/event:id. Boolean action success acknowledges
   only selected matching IDs; rendering/scrolling never acknowledges.
 - Review compares current HEAD -> disk from the watched root. Ownership ties unique
-  session buffers to windows. `ReviewOrigin {tab,win,buf,view}` restores views only
+  session buffers to windows. The review root survives stop; auto-open fetches
+  comparisons and contents asynchronously. File navigation updates buffer names
+  and filetypes as well as contents. `ReviewOrigin {tab,win,buf,view}` restores views only
   for unchanged buffers. Full reviews use a separate tab; never :only on user tabs
   or delete modified/reused buffers. Current Follow pauses; split can continue.
 - Transport callbacks carry generations; old roots and stopped sources cannot
@@ -128,6 +131,9 @@ Pi/OMP streamed edit/write arguments → transient local socket
   {key,kind,path,entry,event_ids,depth,reads,edits,unread,stats?}`.
 - paths.resolve(root,path,allow_missing) rejects unsafe components and links;
   follow.target_path remains its compatibility delegate.
+- paths.rebase(root,repository,path,allow_missing) validates repository-relative
+  metadata and converts only in-scope paths to watched-root-relative paths.
+  Live socket discovery hashes the Git repository root, including for subdirectory watches.
 - status.set(section,value) replaces a whitelisted section; get/compact/statusline
   expose observable facts; User AgentLensStatusChanged coalesces changes.
 - follow.pause/resume/state/stop/set_window; follow_view.setup/render/freeze/
@@ -142,6 +148,10 @@ Pi/OMP streamed edit/write arguments → transient local socket
   HEAD is unavailable; binary reviews are rejected; renames use delete/add paths.
 - diff_view.preview/open/navigate_hunk/navigate_file/refresh return success;
   close tears down only owned UI. Public lens.show_diff/preview return booleans.
+- keymaps.set/clear remember callback ownership; setup removes disabled/moved
+  global and timeline mappings without removing user replacements.
+- diff.file_diff/status_summary and timeline.latest_for_path/latest_edit_for_path
+  remain supported compatibility APIs for integrations. Timeline entries do not cache diffs.
 
 ## Development rules
 
