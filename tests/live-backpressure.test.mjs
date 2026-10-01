@@ -1,5 +1,6 @@
 // A slow editor skips intermediate snapshots instead of losing its connection,
-// because Neovim treats an unexpected close as cancellation of the tool call.
+// because Neovim treats an unexpected close as cancellation of the tool call,
+// and still receives the final snapshot after the call has finished.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
@@ -37,6 +38,14 @@ try {
     await pause(40);
   }
   assert.ok(peer, "receiver connected");
+  // The final snapshot is produced while the receiver still lags.
+  live.update(repo, root, {
+    toolCallId: "call",
+    toolName: "write",
+    input: { path: "big.txt", content: snapshot("final") },
+    isFinal: true,
+  });
+  live.finish("call");
 
   // A paused socket only observes the sender closing once it reads again.
   peer.resume();
@@ -45,11 +54,11 @@ try {
     const complete = received.slice(0, received.lastIndexOf("\n") + 1);
     const records = complete.split("\n").filter(Boolean);
     last = records.length ? JSON.parse(records.at(-1)) : undefined;
-    if (last?.lines?.[0]?.startsWith("frame-8 ")) break;
+    if (last?.lines?.[0]?.startsWith("final ")) break;
     await pause(20);
   }
   assert.equal(closed, false, "a lagging receiver keeps its connection");
-  assert.ok(last?.lines?.[0]?.startsWith("frame-8 "), "newest snapshot arrives after catching up");
+  assert.ok(last?.lines?.[0]?.startsWith("final "), "final snapshot arrives after catching up");
   console.log("Live preview backpressure OK");
 } finally {
   live.stop();

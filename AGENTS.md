@@ -110,8 +110,8 @@ Pi/OMP streamed edit/write arguments → transient local socket
   for unchanged buffers. Full reviews use a separate tab; never :only on user tabs
   or delete modified/reused buffers. Current Follow pauses; split can continue.
 - Transport callbacks carry generations; old roots and stopped sources cannot
-  restore views/status. Receivers decode only the newest complete snapshot per peer; senders skip
-  frames for lagging peers instead of closing. Graceful socket closure drains it
+  restore views/status. Receivers bound every record, then decode only the newest snapshot per peer;
+  senders keep one newest unsent record per lagging peer and write it on drain. Graceful socket closure drains it
   before removing the peer, then consumes already-written metadata before deciding
   cancellation. Missing logs/no peers are waiting, not host-liveness facts.
   Status setters whitelist scalar metadata; public snapshots never expose contents.

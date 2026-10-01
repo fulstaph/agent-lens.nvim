@@ -194,8 +194,12 @@ function M.start(root)
   reset_changes()
 
   watcher.start(root, on_file_change, {
-    ignored_directories = function(rel_dir)
-      return diff_engine.ignored_directories(root, rel_dir)
+    -- Startup scans wait for the answer; new directories ask without blocking.
+    ignored_directories = function(rel_dir, done)
+      if not done then
+        return diff_engine.ignored_directories(root, rel_dir)
+      end
+      diff_engine.async(diff_engine.ignored_directories, done, root, rel_dir)
     end,
   })
   status.set("watcher", { state = watcher.is_running() and "running" or "stopped", root = root })

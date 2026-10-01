@@ -11,7 +11,7 @@ local M = {}
 ---@field running boolean Whether the watcher is active
 ---@field _debounce_timers table<string, userdata> Pending debounce timers per file
 ---@field _on_change fun(path: string, events: table) Callback for file changes
----@field _ignored_directories? fun(rel_dir: string): table<string, boolean> Ignored directory provider
+---@field _ignored_directories? fun(rel_dir: string, done?: fun(skip: table<string, boolean>|nil)): table<string, boolean>|nil Ignored directory provider
 
 ---@type AgentLensWatcher|nil
 M._instance = nil
@@ -173,26 +173,44 @@ end
 local watch_dir_recursive
 
 --- Watch a directory tree, skipping directories the provider reports as ignored.
+--- The initial scan asks synchronously; a directory created later is attached once
+--- the provider answers, so Git never blocks an fs-event callback.
 ---@param watcher AgentLensWatcher
 ---@param dir string
-local function watch_tree(watcher, dir)
+---@param created? boolean The directory appeared after watching started
+local function watch_tree(watcher, dir, created)
   local rel = dir == watcher.root and "" or dir:sub(#watcher.root + 2)
-  local skip = watcher._ignored_directories and watcher._ignored_directories(rel) or {}
-  if not skip[rel] then
-    watch_dir_recursive(watcher, dir, skip)
+  local function attach(skip)
+    skip = skip or {}
+    if not skip[rel] then
+      watch_dir_recursive(watcher, dir, skip, created)
+    end
   end
+  local provider = watcher._ignored_directories
+  if not provider then
+    attach({})
+  elseif created then
+    provider(rel, attach)
+  else
+    attach(provider(rel))
+  end
+end
+
+local function watch_created_tree(watcher, dir)
+  watch_tree(watcher, dir, true)
 end
 
 --- Scan a directory and attach watchers to all subdirectories.
 ---@param watcher AgentLensWatcher
 ---@param dir string
 ---@param skip table<string, boolean> Root-relative directories not to watch
-function watch_dir_recursive(watcher, dir, skip)
+---@param created? boolean Report files found here: they are newer than their watcher
+function watch_dir_recursive(watcher, dir, skip, created)
   if not watcher.running or watcher.watchers[dir] then
     return
   end
   -- A missing handle skips this subtree; a failed start still scans its children.
-  if attach_watcher(watcher, dir, false, watch_tree) == nil then
+  if attach_watcher(watcher, dir, false, watch_created_tree) == nil then
     return
   end
 
@@ -205,12 +223,19 @@ function watch_dir_recursive(watcher, dir, skip)
         break
       end
       local child = dir .. "/" .. name
+      local rel_child = child:sub(#watcher.root + 2)
       if
         typ == "directory"
         and not is_ignored(name, config.options.filter.ignore_patterns)
-        and not skip[child:sub(#watcher.root + 2)]
+        and not skip[rel_child]
       then
-        watch_dir_recursive(watcher, child, skip)
+        watch_dir_recursive(watcher, child, skip, created)
+      elseif
+        created
+        and typ == "file"
+        and not is_ignored(rel_child, config.options.filter.ignore_patterns)
+      then
+        schedule_debounce(watcher, child, rel_child, { change = true })
       end
     end
   end
@@ -219,7 +244,7 @@ end
 --- Start watching a directory tree.
 ---@param root string Root directory to watch
 ---@param on_change fun(path: string, events: table) Callback when a file changes
----@param opts? {ignored_directories?: fun(rel_dir: string): table<string, boolean>} Directories to leave unwatched on per-directory platforms
+---@param opts? {ignored_directories?: fun(rel_dir: string, done?: fun(skip: table<string, boolean>|nil)): table<string, boolean>|nil} Directories to leave unwatched on per-directory platforms; returns the set, or passes it to done when given
 ---@return AgentLensWatcher
 function M.start(root, on_change, opts)
   if M._instance and M._instance.running then

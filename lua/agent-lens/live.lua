@@ -174,6 +174,11 @@ function M.start(root)
         if not boundary then
           break
         end
+        -- Every record is bounded, including skipped ones, before anything is decoded.
+        if boundary - start > MAX_BYTES then
+          close_peer(peer)
+          return
+        end
         first, last, start = start, boundary - 1, boundary + 1
       end
       if first then

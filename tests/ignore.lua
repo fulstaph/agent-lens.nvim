@@ -80,29 +80,40 @@ local ok, err = xpcall(function()
   _G.jit = setmetatable({ os = "Linux" }, { __index = native_jit })
   package.loaded["agent-lens.watcher"] = nil
   local per_dir = require("agent-lens.watcher")
-  local watched = xpcall(function()
-    per_dir.start(root, function() end, {
-      ignored_directories = function(rel)
-        return diff.ignored_directories(root, rel)
+  local watched, watch_err = xpcall(function()
+    local delivered, lookups = {}, {}
+    per_dir.start(root, function(path)
+      delivered[path] = true
+    end, {
+      ignored_directories = function(rel, done)
+        lookups[rel] = done and "async" or "sync"
+        if not done then
+          return diff.ignored_directories(root, rel)
+        end
+        diff.async(diff.ignored_directories, done, root, rel)
       end,
     })
     local handles = per_dir._instance.watchers
+    assert(lookups[""] == "sync", "startup scan knows ignored directories before attaching")
     assert(handles[root] and handles[root .. "/src"], "ordinary directories are watched")
     assert(not handles[root .. "/dist"] and not handles[root .. "/dist/nested"], "ignored tree")
     vim.fn.mkdir(root .. "/build/deep", "p")
     vim.fn.mkdir(root .. "/lib/inner", "p")
+    -- Written before the new directory's watcher can exist.
+    vim.fn.writefile({ "early" }, root .. "/lib/inner/early.lua")
     assert(
       vim.wait(3000, function()
-        return handles[root .. "/lib/inner"] ~= nil
+        return handles[root .. "/lib/inner"] ~= nil and delivered["lib/inner/early.lua"]
       end, 20),
-      "new ordinary directories are watched"
+      "new directories are watched and their existing files reported"
     )
+    assert(lookups.lib == "async" and lookups.build == "async", "fs events never wait on Git")
     assert(not handles[root .. "/build"], "new ignored directories are not watched")
   end, debug.traceback)
   per_dir.stop()
   _G.jit = native_jit
   package.loaded["agent-lens.watcher"] = nil
-  assert(watched)
+  assert(watched, watch_err)
 
   -- End to end: ignored and glob-ignored files never reach the timeline.
   local lens = require("agent-lens")
