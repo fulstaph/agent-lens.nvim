@@ -23,6 +23,7 @@ local inline = require("agent-lens.inline")
 local follow = require("agent-lens.follow")
 local live = require("agent-lens.live")
 local keymaps = require("agent-lens.keymaps")
+local motion = require("agent-lens.motion")
 
 local status = require("agent-lens.status")
 local M = {}
@@ -331,14 +332,13 @@ end
 local function review_root()
   return M._root or read_events.root() or history_root or diff_engine.git_root()
 end
-local function selected_or_current(entry)
+local function selected_or_current(entry, root)
   if entry then
     return entry
   end
   if panel.is_open() then
     return panel.selected()
   end
-  local root = review_root()
   local path = vim.api.nvim_buf_get_name(0)
   local real = root and vim.uv.fs_realpath(root)
   if real and path:sub(1, #real + 1) == real .. "/" then
@@ -360,12 +360,8 @@ local function open_read(entry, root)
     local b = vim.api.nvim_win_get_buf(w)
     if
       w ~= panel._win
-      and vim.api.nvim_win_get_config(w).relative == ""
+      and motion.plain_window(w)
       and vim.bo[b].buftype == ""
-      and not vim.wo[w].diff
-      and not vim.wo[w].previewwindow
-      and not vim.wo[w].cursorbind
-      and not vim.wo[w].scrollbind
       and not vim.wo[w].winfixbuf
       and (b == buf or not vim.bo[b].modified)
     then
@@ -397,13 +393,14 @@ local function open_read(entry, root)
   return true
 end
 local function open_entry(entry, method, missing_message)
-  entry = selected_or_current(entry)
+  -- One lookup: without a watched root this spawns Git, so it is not repeated.
+  local root = review_root()
+  entry = selected_or_current(entry, root)
   if not entry then
     vim.notify("[agent-lens] " .. missing_message, vim.log.levels.INFO)
     return false
   end
   yield_follow("review")
-  local root = review_root()
   if entry.kind == "read" then
     return open_read(entry, root)
   end
