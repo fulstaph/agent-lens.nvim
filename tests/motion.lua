@@ -195,6 +195,94 @@ test("completed_batch_remains_visible_until_revealed", function()
   vim.fn.delete(root, "rf")
 end)
 
+-- Frames rewrite only the changed region, so check them against large untouched context.
+test("region_reveal_preserves_context", function()
+  local above, below = {}, {}
+  for row = 1, 300 do
+    above[row] = "above " .. row
+    below[row] = "below " .. row
+  end
+  local function around(middle)
+    return vim.list_extend(vim.list_extend(vim.deepcopy(above), middle), below)
+  end
+  local function middle_text(lines)
+    return table.concat(vim.list_slice(lines, #above + 1, #lines - #below), "\n")
+  end
+  -- A typed reveal shows a prefix of the final text followed by its ending.
+  local function typed(frame, final)
+    for k = 0, #frame do
+      if frame == final:sub(1, k) .. final:sub(#final - (#frame - k) + 1) then
+        return true
+      end
+    end
+    return false
+  end
+  -- The clock advances only when a frame is painted, so every run sees the same frames.
+  local hrtime, clock = vim.uv.hrtime, 0
+  vim.uv.hrtime = function()
+    return clock * 1000000
+  end
+  local ok, err = pcall(function()
+    local buf = draft(around({ "alpha", "old two" }))
+    local function check(lines, final, row, col)
+      assert(vim.deep_equal(vim.list_slice(lines, 1, #above), above), "context above is kept")
+      assert(
+        vim.deep_equal(vim.list_slice(lines, #lines - #below + 1, #lines), below),
+        "context below is kept"
+      )
+      assert(typed(middle_text(lines), final), "every frame is a typed reveal")
+      assert(row >= 1 and row <= #lines and col <= #lines[row], "caret stays in the draft")
+    end
+    local function reveal(snapshot)
+      local final, state = middle_text(snapshot), { frames = 0, done = false }
+      motion.reveal(buf, snapshot, #above + 1, function(row, col, done)
+        -- Frames arrive from timer ticks, so keep the first failure for the test to raise.
+        local valid, problem = pcall(check, content(buf), final, row, col)
+        state.problem = state.problem or (not valid and problem) or nil
+        clock = clock + 23
+        state.frames = state.frames + 1
+        state.done = done
+      end)
+      return state
+    end
+    local function settle(state, snapshot)
+      assert(
+        vim.wait(2000, function()
+          return state.done
+        end, 5),
+        "reveal settles"
+      )
+      assert(not state.problem, state.problem)
+      assert(vim.deep_equal(content(buf), snapshot), "final frame is the exact snapshot")
+    end
+    for _, middle in ipairs({
+      { "alpha", "a grown π🌱 row", "", "and more rows", "to type" }, -- region grows
+      { "alpha" }, -- region shrinks to nothing
+      { "replaced first", "alpha" }, -- change at the region start
+    }) do
+      local snapshot = around(middle)
+      local state = reveal(snapshot)
+      settle(state, snapshot)
+    end
+    -- Retarget mid-animation: the next snapshot diffs against the partial frame.
+    local first = reveal(around({ "replaced first", "alpha", "a long line being typed slowly" }))
+    assert(
+      vim.wait(1000, function()
+        return first.frames >= 3
+      end, 5),
+      "first reveal animates"
+    )
+    assert(not first.problem, first.problem)
+    assert(motion.is_revealing(buf), "retarget happens mid-animation")
+    local latest = around({ "a different", "set of", "rows" })
+    settle(reveal(latest), latest)
+  end)
+  vim.uv.hrtime = hrtime
+  if not ok then
+    error(err, 0)
+  end
+end)
+
 if #failures > 0 then
   error(table.concat(failures, "\n"))
 end
