@@ -68,6 +68,10 @@ function M.setup(opts)
   finished = {}
   order = {}
   view.setup(opts, function(why, insert)
+    if why == "returned" then
+      render()
+      return
+    end
     if control == "off" then
       return
     end
@@ -105,6 +109,18 @@ function M.resume()
     publish()
     return false
   end
+  publish()
+  return true
+end
+--- Change current/split mode without changing control state.
+---@param mode string
+---@return boolean
+function M.set_window(mode)
+  if not view.set_window(mode) then
+    return false
+  end
+  window = mode
+  render()
   publish()
   return true
 end

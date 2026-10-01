@@ -13,6 +13,20 @@ local guard = false
 local current_win
 local on_input
 local opts = {}
+local owned
+local window_mode = "current"
+local function owned_bar()
+  if
+    owned
+    and vim.api.nvim_win_is_valid(owned.win)
+    and vim.api.nvim_win_get_buf(owned.win) == owned.buf
+  then
+    if owned.bar == nil or vim.wo[owned.win].winbar == owned.bar then
+      owned.bar = require("agent-lens.status").statusline()
+      vim.wo[owned.win].winbar = owned.bar
+    end
+  end
+end
 local target
 local mark
 local warned_split = false
@@ -131,6 +145,9 @@ local function clear_preview()
     for _, win in ipairs(vim.fn.win_findbuf(previous.buf)) do
       local view = vim.api.nvim_win_call(win, vim.fn.winsaveview)
       pcall(vim.api.nvim_win_set_buf, win, source)
+      if owned and owned.win == win then
+        owned.buf = source
+      end
       view.lnum = math.min(view.lnum, vim.api.nvim_buf_line_count(source))
       local text = vim.api.nvim_buf_get_lines(source, view.lnum - 1, view.lnum, false)[1] or ""
       view.col = math.min(view.col, math.max(0, #text - 1))
@@ -191,7 +208,7 @@ end
 
 local function create_window(buf)
   local ok, win = pcall(vim.api.nvim_open_win, buf, false, {
-    split = "right",
+    split = window_mode == "split" and (opts.split and opts.split.position or "right") or "right",
     win = vim.api.nvim_get_current_win(),
   })
   if not ok or not win then
@@ -208,10 +225,42 @@ local function create_window(buf)
   vim.wo[win].cursorbind = false
   vim.wo[win].scrollbind = false
   warned_split = false
+  if window_mode == "split" then
+    owned = { win = win, buf = buf, tab = vim.api.nvim_get_current_tabpage() }
+    local width = opts.split and opts.split.width or 0
+    if type(width) ~= "number" or width < 0 or width % 1 ~= 0 then
+      width = 0
+    end
+    local available = vim.o.columns
+    width = width == 0 and math.floor(available / 2) or width
+    pcall(vim.api.nvim_win_set_width, win, math.max(1, math.min(width, available - 2)))
+    owned_bar()
+  end
   return win
 end
 
 local function select_window(buf)
+  if window_mode == "split" then
+    if owned then
+      if
+        not vim.api.nvim_win_is_valid(owned.win)
+        or vim.api.nvim_win_get_buf(owned.win) ~= owned.buf
+      then
+        owned = nil
+        on_input("agent split closed or reused", false)
+        return nil
+      end
+      if owned.tab ~= vim.api.nvim_get_current_tabpage() then
+        return nil
+      end
+      if is_editor_window(owned.win, buf) then
+        return owned.win
+      end
+      on_input("agent split protected", false)
+      return nil
+    end
+    return create_window(buf)
+  end
   local current = vim.api.nvim_get_current_win()
   if is_editor_window(current, buf) then
     return current
@@ -281,6 +330,10 @@ local function render()
     end
   end
 
+  if owned and owned.win == win then
+    owned.buf = buf
+    owned_bar()
+  end
   local requested_line = drafting and preview.line or target.line
   local line = math.max(1, math.min(requested_line or 1, vim.api.nvim_buf_line_count(buf)))
   local placed, id = pcall(vim.api.nvim_buf_set_extmark, buf, namespace, line - 1, 0, {
@@ -320,6 +373,7 @@ end
 function M.setup(options, callback)
   M.clear()
   opts = options
+  window_mode = opts.window or "current"
   on_input = callback
   local ns = vim.api.nvim_create_namespace("agent_lens_input")
   vim.on_key(function(key, typed)
@@ -352,16 +406,65 @@ function M.setup(options, callback)
         and current_win
         and vim.api.nvim_get_current_win() == current_win
       then
-        on_input(ev.event == "CmdlineEnter" and "command line" or "left followed window", false)
+        if ev.event == "CmdlineEnter" or window_mode == "current" then
+          on_input(ev.event == "CmdlineEnter" and "command line" or "left followed window", false)
+        elseif ev.event == "TabLeave" then
+          M.freeze()
+        end
       end
     end,
   })
+  vim.api.nvim_create_autocmd("TabEnter", {
+    group = group,
+    callback = function()
+      if
+        not guard
+        and window_mode == "split"
+        and owned
+        and owned.tab == vim.api.nvim_get_current_tabpage()
+      then
+        on_input("returned", false)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = group,
+    callback = function(ev)
+      if not guard and owned and tonumber(ev.match) == owned.win then
+        owned = nil
+        current_win = nil
+        on_input("agent split closed", false)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufWinEnter", {
+    group = group,
+    callback = function()
+      if
+        not guard
+        and owned
+        and vim.api.nvim_win_is_valid(owned.win)
+        and vim.api.nvim_win_get_buf(owned.win) ~= owned.buf
+      then
+        owned = nil
+        current_win = nil
+        on_input("agent split reused", false)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd(
+    "User",
+    { group = group, pattern = "AgentLensStatusChanged", callback = owned_bar }
+  )
 end
 --- Render one latest validated target and optional bounded snapshot.
 ---@param next_target FollowTarget
 ---@param event? table
 ---@return boolean
 function M.render(next_target, event)
+  if window_mode == "split" and owned and owned.tab ~= vim.api.nvim_get_current_tabpage() then
+    return false
+  end
   local mode = vim.fn.mode(1)
   if vim.fn.getcmdwintype() ~= "" or mode:match("^[icRr]") then
     on_input("unsafe editor mode", false)
@@ -469,9 +572,43 @@ function M.clear()
   motion.stop()
   clear_preview()
   clear_mark()
+  if
+    owned
+    and vim.api.nvim_win_is_valid(owned.win)
+    and vim.api.nvim_win_get_buf(owned.win) == owned.buf
+  then
+    if #vim.api.nvim_tabpage_list_wins(owned.tab) > 1 then
+      pcall(vim.api.nvim_win_close, owned.win, true)
+    elseif owned.bar and vim.wo[owned.win].winbar == owned.bar then
+      vim.wo[owned.win].winbar = ""
+    end
+  end
+  owned = nil
   target = nil
   current_win = nil
   frozen = false
   guard = false
+end
+--- Select a window mode, releasing only an unused owned split.
+---@param mode string
+---@return boolean
+function M.set_window(mode)
+  if mode ~= "current" and mode ~= "split" then
+    return false
+  end
+  guard = true
+  if
+    owned
+    and vim.api.nvim_win_is_valid(owned.win)
+    and vim.api.nvim_win_get_buf(owned.win) == owned.buf
+    and #vim.api.nvim_tabpage_list_wins(owned.tab) > 1
+  then
+    pcall(vim.api.nvim_win_close, owned.win, true)
+  end
+  owned = nil
+  current_win = nil
+  window_mode = mode
+  guard = false
+  return true
 end
 return M

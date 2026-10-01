@@ -192,6 +192,12 @@ function M.resume_follow()
   return follow.resume()
 end
 
+---@param mode string
+---@return boolean
+function M.set_follow_window(mode)
+  return follow.set_window(mode)
+end
+
 --- Open diff for the currently selected timeline entry.
 function M.show_diff()
   local entry = panel.selected()
@@ -269,6 +275,19 @@ function M.setup(opts)
       { desc = "Resume Follow Agent" }
     )
   end
+  vim.api.nvim_create_user_command("AgentLensFollowMode", function(cmd)
+    local mode = cmd.args ~= "" and cmd.args
+      or (follow.state().window == "current" and "split" or "current")
+    if not M.set_follow_window(mode) then
+      vim.notify("[agent-lens] Follow mode must be current or split", vim.log.levels.WARN)
+    end
+  end, {
+    nargs = "?",
+    complete = function()
+      return { "current", "split" }
+    end,
+    desc = "Choose Follow window mode",
+  })
   -- Register user commands
   vim.api.nvim_create_user_command(
     "AgentLensStatus",

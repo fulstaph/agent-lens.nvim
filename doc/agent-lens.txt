@@ -218,3 +218,14 @@ followed window/tab pause; Insert hands drafts back to their source, preserving
 unsaved text and normal input. Set follow.auto_pause=false to disable ordinary
 key-navigation pauses; modal/Insert protections still apply. Clear returns
 enabled Follow to waiting. Stop disables Follow and closes its transports.
+
+Dedicated agent window
+----------------------
+:AgentLensFollowMode [current|split] toggles or chooses a window mode;
+lens.set_follow_window(mode) preserves paused/following control. Default
+follow.window="current"; split mode owns one window, keeps keyboard focus, and
+allows editing elsewhere. follow.split={position="right",width=0} uses half
+width; position can be left and positive widths clamp to the editor. Closing
+or reusing the split pauses; only resume/mode actions recreate it. Inactive
+tabs freeze and a still-following split catches up on return. Customizing its
+winbar stops Agent Lens from replacing that winbar.

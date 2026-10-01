@@ -113,6 +113,7 @@ The metadata path, follow projection, in-buffer overlays, and installable
 bridge package have behavioral tests:
 
 ```bash
+nvim --headless -u NONE -l tests/follow_split.lua
 nvim --headless -u NONE -l tests/follow_controls.lua
 nvim --headless -u NONE -l tests/status.lua
 nvim --headless -u NONE -l tests/paths.lua
@@ -163,3 +164,6 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `perf`
 Follow control is off/following/paused. Paused tracking holds one bounded latest
 snapshot, freezes motion and restores authoritative source on settled resume.
 Input uses vim.on_key provenance; cursor autocmds alone never imply user input.
+
+Follow split ownership is window/buffer/tab-specific; teardown preserves any
+user-repurposed window. Inactive tabs retain current controller state only.

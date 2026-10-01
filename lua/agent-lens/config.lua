@@ -66,6 +66,8 @@ M.defaults = {
     animation = true,
     animation_ms = 180,
     auto_pause = true,
+    window = "current",
+    split = { position = "right", width = 0 },
   },
   highlights = {
     added = "DiffAdd",
