@@ -8,7 +8,7 @@ const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const manifest = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf8"));
 
 assert.equal(manifest.name, "agent-lens.nvim");
-assert.equal(manifest.version, "0.1.0");
+assert.match(manifest.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, "release version");
 assert.equal(manifest.type, "module");
 assert.equal(manifest.license, "MIT");
 assert.equal(manifest.repository?.type, "git");
