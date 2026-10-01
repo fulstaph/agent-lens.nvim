@@ -19,6 +19,7 @@ lua/agent-lens/
 ├── diff_view.lua   — Side-by-side edit diff viewer
 ├── read_events.lua — JSONL trust boundary for Pi/OMP reads and locations
 ├── inline.lua      — Persistent read-range/write-line extmarks
+├── paths.lua       — Shared repository-relative file validation
 ├── follow.lua      — One live agent marker, safe window selection, viewport following
 ├── live.lua        — Private local-socket receiver for transient code previews
 ├── motion.lua      — Bounded UTF-8 text reveal, caret, and viewport easing
@@ -110,6 +111,7 @@ The metadata path, follow projection, in-buffer overlays, and installable
 bridge package have behavioral tests:
 
 ```bash
+nvim --headless -u NONE -l tests/paths.lua
 nvim --headless -u NONE -l tests/read_events.lua
 nvim --headless -u NONE -l tests/follow.lua
 nvim --headless -u NONE -l tests/follow_lifecycle.lua
