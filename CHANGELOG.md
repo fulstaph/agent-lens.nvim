@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v0.2.0 — 2026-10-02
+## v0.1.0 — 2026-10-02
 
 Improve watcher responsiveness, review correctness, and live-preview reliability.
 

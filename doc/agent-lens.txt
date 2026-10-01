@@ -20,7 +20,7 @@ Filesystem writes from any process are tracked; they are not agent attribution.
 1. SETUP                                                *agent-lens-setup*
 
 Add fulstaph/agent-lens.nvim to your plugin manager and configure:
-The current release tag is v0.2.0. Pin the plugin to this tag and install
+The current release tag is v0.1.0. Pin the plugin to this tag and install
 the matching bridge version below.
 >lua
   require('agent-lens').setup({
@@ -32,8 +32,8 @@ the matching bridge version below.
 Automatic watching defaults to enabled; reads and Follow default to disabled.
 Install the optional dual-host bridge, then restart the Pi/OMP session:
 >sh
-  omp install 'github:fulstaph/agent-lens.nvim#v0.2.0'
-  pi install git:github.com/fulstaph/agent-lens.nvim@v0.2.0
+  omp install 'github:fulstaph/agent-lens.nvim#v0.1.0'
+  pi install git:github.com/fulstaph/agent-lens.nvim@v0.1.0
 <
 For local development use `omp install .` or `pi install .` in the checkout.
 One-session fallback:
