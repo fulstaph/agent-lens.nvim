@@ -21,7 +21,7 @@ lua/agent-lens/
 ├── read_events.lua — JSONL trust boundary for Pi/OMP reads and locations
 ├── inline.lua      — Persistent read-range/write-line extmarks
 ├── status.lua      — Copied observable metadata and details UI
-├── paths.lua       — Shared repository-relative file validation
+├── paths.lua       — Shared trust-boundary validation (paths, call IDs, agents)
 ├── keymaps.lua     — Owned normal-mode mappings and safe reconfiguration
 ├── follow_view.lua — Source/draft lifecycle, input provenance and safe rendering
 ├── follow.lua      — Control/activity, correlation, latest pending snapshot
@@ -130,7 +130,8 @@ Pi/OMP streamed edit/write arguments → transient local socket
 - `PanelOptions {view,filter,unread_only,expanded}`; `PanelRow
   {key,kind,path,entry,event_ids,depth,reads,edits,unread,stats?}`.
 - paths.resolve(root,path,allow_missing) rejects unsafe components and links;
-  follow.target_path remains its compatibility delegate.
+  paths.positive_integer/call_id/agent_name are the scalar checks both transports
+  share. follow.target_path remains a compatibility delegate.
 - paths.rebase(root,repository,path,allow_missing) validates repository-relative
   metadata and converts only in-scope paths to watched-root-relative paths.
   Live socket discovery hashes the Git repository root, including for subdirectory watches.

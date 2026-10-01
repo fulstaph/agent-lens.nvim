@@ -4,7 +4,7 @@ local timeline = require("agent-lens.timeline")
 local model = require("agent-lens.panel_model")
 local status = require("agent-lens.status")
 local keymaps = require("agent-lens.keymaps")
-local M = { _buf = nil, _win = nil, _cursor = 1 }
+local M = { _buf = nil, _win = nil }
 local options = { view = "files", filter = "all", unread_only = false, expanded = {} }
 local rows = {}
 local key
@@ -16,6 +16,10 @@ local function truncate(text, width)
   end
   if width < 2 then
     return vim.fn.strcharpart(text, 0, math.max(0, width))
+  end
+  -- Printable ASCII is one cell per byte: cut directly instead of measuring each prefix.
+  if not text:find("[^ -~]") then
+    return text:sub(1, math.max(0, width - vim.fn.strdisplaywidth("…"))) .. "…"
   end
   local out = ""
   for c in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
@@ -30,9 +34,9 @@ local function row_line(i)
   return 5 + (i - 1) * 2
 end
 local function selected_row()
-  for _, r in ipairs(rows) do
+  for i, r in ipairs(rows) do
     if r.key == key then
-      return r
+      return r, i
     end
   end
 end
@@ -47,7 +51,6 @@ function M.setup(opts)
   }
   rows = {}
   key = nil
-  M._cursor = 1
   vim.api.nvim_create_autocmd("User", {
     group = vim.api.nvim_create_augroup("AgentLensPanelStatus", { clear = true }),
     pattern = "AgentLensStatusChanged",
@@ -95,7 +98,7 @@ function M.render(preserve_anchor)
     "Latest retained + " .. s.added .. " / - " .. s.removed,
     options.view .. " · " .. options.filter .. (options.unread_only and " · new only" or ""),
   }
-  for i, r in ipairs(rows) do
+  for _, r in ipairs(rows) do
     local marker = r.kind == "file" and (options.expanded[r.path] and "v " or "> ")
       or (r.entry.kind == "read" and "R " or "E ")
     lines[#lines + 1] = string.rep(" ", r.depth * 2) .. marker .. r.path
@@ -107,9 +110,6 @@ function M.render(preserve_anchor)
       ) .. " · " .. (r.entry.kind == "read" and "read" or r.entry.status)))
       .. stats
       .. (r.unread > 0 and (" · " .. r.unread .. " new") or "")
-    if r.key == key then
-      M._cursor = i
-    end
   end
   if #rows == 0 then
     lines[#lines + 1] = s.total == 0 and "No activity yet."
@@ -127,33 +127,15 @@ function M.render(preserve_anchor)
   vim.api.nvim_buf_set_lines(M._buf, 0, -1, false, lines)
   vim.bo[M._buf].modifiable = false
   vim.api.nvim_buf_clear_namespace(M._buf, ns, 0, -1)
-  vim.api.nvim_buf_add_highlight(M._buf, ns, config.options.highlights.header, 0, 0, -1)
+  local function highlight(group, line)
+    vim.api.nvim_buf_add_highlight(M._buf, ns, config.options.highlights[group], line, 0, -1)
+  end
+  highlight("header", 0)
   for i, r in ipairs(rows) do
-    vim.api.nvim_buf_add_highlight(
-      M._buf,
-      ns,
-      config.options.highlights.timeline_file,
-      row_line(i) - 1,
-      0,
-      -1
-    )
-    vim.api.nvim_buf_add_highlight(
-      M._buf,
-      ns,
-      config.options.highlights.timeline_time,
-      row_line(i),
-      0,
-      -1
-    )
+    highlight("timeline_file", row_line(i) - 1)
+    highlight("timeline_time", row_line(i))
     if r.key == key then
-      vim.api.nvim_buf_add_highlight(
-        M._buf,
-        ns,
-        config.options.highlights.timeline_selected,
-        row_line(i) - 1,
-        0,
-        -1
-      )
+      highlight("timeline_selected", row_line(i) - 1)
       if M.is_open() then
         local line = row_line(i)
         pcall(vim.api.nvim_win_set_cursor, M._win, { line, 0 })
@@ -180,7 +162,6 @@ function M.open()
   M._buf = buf
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].filetype = "agent-lens-timeline"
-  vim.bo[buf].swapfile = false
   vim.api.nvim_buf_set_name(buf, "agent-lens://timeline")
   local pos = config.options.timeline_position
   M._win = vim.api.nvim_open_win(
@@ -241,8 +222,8 @@ function M.move(delta)
   if #rows == 0 then
     return
   end
-  M._cursor = math.max(1, math.min(#rows, M._cursor + delta))
-  key = rows[M._cursor].key
+  local _, index = selected_row()
+  key = rows[math.max(1, math.min(#rows, (index or 1) + delta))].key
   M.render(false)
 end
 ---@return TimelineEntry|nil

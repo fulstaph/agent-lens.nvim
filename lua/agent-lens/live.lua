@@ -13,15 +13,6 @@ local generation = 0
 local MAX_BYTES = 1024 * 1024
 local MAX_LINES = 20000
 local MAX_PEERS = 8
-local MAX_CALL_ID_BYTES = 256
-
-local function count_peers()
-  local count = 0
-  for _ in pairs(peers) do
-    count = count + 1
-  end
-  return count
-end
 
 --- Get the private socket directory shared with the Pi/OMP bridge.
 ---@param root string
@@ -43,15 +34,9 @@ local function validate_preview(root, repository_root, event)
     or event.v ~= 1
     or event.kind ~= "preview"
     or (event.tool ~= "edit" and event.tool ~= "write")
-    or type(event.toolCallId) ~= "string"
-    or #event.toolCallId == 0
-    or #event.toolCallId > MAX_CALL_ID_BYTES
-    or type(event.sequence) ~= "number"
-    or event.sequence % 1 ~= 0
-    or event.sequence < 1
-    or type(event.line) ~= "number"
-    or event.line % 1 ~= 0
-    or event.line < 1
+    or not paths.call_id(event.toolCallId)
+    or not paths.positive_integer(event.sequence)
+    or not paths.positive_integer(event.line)
     or type(event.lines) ~= "table"
     or not vim.islist(event.lines)
     or #event.lines == 0
@@ -73,10 +58,7 @@ local function validate_preview(root, repository_root, event)
       return false
     end
   end
-  event.agent = type(event.agent) == "string"
-      and event.agent:match("^[%w_%-]+$")
-      and event.agent:sub(1, 32)
-    or config.options.agent_name
+  event.agent = paths.agent_name(event.agent) or config.options.agent_name
   event.path = path
   return true
 end
@@ -102,16 +84,17 @@ local function close_peer(peer, drain)
       end
       peers[peer] = nil
     end
-    if state.generation == generation then
-      local count = count_peers()
-      local previous = status.get().preview
-      status.set("preview", {
-        state = count == 0 and "listening" or previous.state,
-        peers = count,
-        last_valid_at = previous.last_valid_at,
-      })
+    if state.generation ~= generation then
+      return
     end
-    if state.generation == generation and state.call_id then
+    local count = vim.tbl_count(peers)
+    local previous = status.get().preview
+    status.set("preview", {
+      state = count == 0 and "listening" or previous.state,
+      peers = count,
+      last_valid_at = previous.last_valid_at,
+    })
+    if state.call_id then
       local feed = require("agent-lens.read_events")
       if feed.root() == state.root then
         feed.poll()
@@ -163,7 +146,7 @@ function M.start(root)
       peer:close()
       return
     end
-    if count_peers() >= MAX_PEERS then
+    if vim.tbl_count(peers) >= MAX_PEERS then
       peer:close()
       return
     end
@@ -174,11 +157,13 @@ function M.start(root)
         close_peer(peer, not read_err)
         return
       end
+      -- Earlier pending bytes hold no newline, so only the new chunk is scanned.
+      local scan = #state.pending + 1
       state.pending = state.pending .. chunk
       -- Snapshots are complete states: a slow editor decodes only the newest one.
       local start, first, last = 1, nil, nil
       while true do
-        local boundary = state.pending:find("\n", start, true)
+        local boundary = state.pending:find("\n", scan, true)
         if not boundary then
           break
         end
@@ -188,6 +173,7 @@ function M.start(root)
           return
         end
         first, last, start = start, boundary - 1, boundary + 1
+        scan = start
       end
       if first then
         state.latest = state.pending:sub(first, last)
@@ -210,7 +196,7 @@ function M.start(root)
           if ok and validate_preview(root, repository_root, event) then
             status.set(
               "preview",
-              { state = "receiving", peers = count_peers(), last_valid_at = os.time() }
+              { state = "receiving", peers = vim.tbl_count(peers), last_valid_at = os.time() }
             )
             if follow.record_preview(root, event) then
               state.call_id = event.toolCallId

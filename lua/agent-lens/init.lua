@@ -60,6 +60,14 @@ local BINARY_EXTS = {
   a = true,
 }
 
+--- Current-window Follow yields to review UI; split Follow keeps following.
+---@param why string
+local function yield_follow(why)
+  if follow.state().window == "current" then
+    follow.pause(why)
+  end
+end
+
 --- Record one computed change in the timeline and editor views.
 ---@param root string
 ---@param change {rel_path: string, events: table}
@@ -67,34 +75,20 @@ local BINARY_EXTS = {
 local function apply_change(root, change, snapshot)
   local rel_path, events = change.rel_path, change.events
   local file_diff = snapshot and snapshot.comparison
+  local entry
   if file_diff then
-    timeline.add({
-      rel_path = rel_path,
-      status = file_diff.status,
-      stats = file_diff.stats,
-    })
+    entry =
+      timeline.add({ rel_path = rel_path, status = file_diff.status, stats = file_diff.stats })
   elseif events.deleted then
-    timeline.add({
-      rel_path = rel_path,
-      status = "deleted",
-      stats = { added = 0, removed = 0 },
-    })
+    entry = timeline.add({ rel_path = rel_path, status = "deleted" })
   end
 
-  -- Refresh the panel if it's open
   if panel.is_open() then
     panel.render()
   end
-
-  -- Auto-open diff if configured
   if config.options.auto_open_diff and file_diff then
-    local latest = timeline.entries[#timeline.entries]
-    if latest then
-      if follow.state().window == "current" then
-        follow.pause("review")
-      end
-      diff_view.open(latest, { root = root, snapshot = snapshot })
-    end
+    yield_follow("review")
+    diff_view.open(entry, { root = root, snapshot = snapshot })
   end
 
   -- Hydrate Follow drafts before checktime can prompt about a newly created file.
@@ -197,6 +191,23 @@ local function on_file_change(rel_path, events)
   drain_changes()
 end
 
+--- Stop every source and drop queued work from the previous root.
+local function teardown()
+  generation = generation + 1
+  reset_changes()
+  live.stop()
+  watcher.stop()
+  read_events.stop()
+  M._root = nil
+end
+
+--- Forget retained activity in every projection.
+local function reset_history()
+  follow.clear()
+  timeline.clear()
+  inline.clear()
+end
+
 --- Start watching the project for file changes.
 ---@param root? string Project root (auto-detected from git or cwd)
 ---@return boolean started
@@ -210,9 +221,7 @@ function M.start(root)
   end
   root = real
   if history_root and history_root ~= root then
-    follow.clear()
-    timeline.clear()
-    inline.clear()
+    reset_history()
     panel.setup(config.options.timeline)
     if panel.is_open() then
       panel.render()
@@ -252,13 +261,8 @@ end
 
 --- Stop watching.
 function M.stop()
-  generation = generation + 1
-  reset_changes()
-  live.stop()
-  watcher.stop()
-  read_events.stop()
+  teardown()
   follow.stop()
-  M._root = nil
   status.set("watcher", { state = "stopped", root = history_root })
   vim.notify("[agent-lens] Stopped watching", vim.log.levels.INFO)
 end
@@ -275,20 +279,18 @@ end
 ---@return boolean enabled
 function M.toggle_follow()
   local active = follow.toggle()
-  if active then
-    if not watcher.is_running() then
-      M.start()
-    elseif not read_events.is_running() and M._root then
+  if not active then
+    if not config.options.reads.enabled then
+      read_events.stop()
+    end
+    live.stop()
+  elseif not watcher.is_running() then
+    M.start()
+  elseif M._root then
+    if not read_events.is_running() then
       read_events.start(M._root)
     end
-    if M._root then
-      live.start(M._root)
-    end
-  elseif not config.options.reads.enabled then
-    read_events.stop()
-  end
-  if not active then
-    live.stop()
+    live.start(M._root)
   end
   vim.notify(
     "[agent-lens] Follow Agent " .. (active and "enabled" or "disabled"),
@@ -326,11 +328,6 @@ function M.set_follow_window(mode)
   return follow.set_window(mode)
 end
 
-local function pause_for_review()
-  if follow.state().window == "current" then
-    follow.pause("review")
-  end
-end
 local function review_root()
   return M._root or read_events.root() or history_root or diff_engine.git_root()
 end
@@ -405,7 +402,7 @@ local function open_entry(entry, method, missing_message)
     vim.notify("[agent-lens] " .. missing_message, vim.log.levels.INFO)
     return false
   end
-  pause_for_review()
+  yield_follow("review")
   local root = review_root()
   if entry.kind == "read" then
     return open_read(entry, root)
@@ -434,9 +431,7 @@ end
 
 --- Clear the timeline.
 function M.clear()
-  timeline.clear()
-  inline.clear()
-  follow.clear()
+  reset_history()
   if panel.is_open() then
     panel.render()
   end
@@ -449,16 +444,17 @@ local function register_action_command(name, method, description)
   end, { desc = description })
 end
 
+local function register_keymap(option, method, description)
+  keymaps.set(config.options.keymaps[option], function()
+    M[method]()
+  end, { desc = description })
+end
+
 --- Setup the plugin.
 ---@param opts? AgentLensOpts
 function M.setup(opts)
-  generation = generation + 1
-  reset_changes()
-  watcher.stop()
-  read_events.stop()
-  M._root = nil
+  teardown()
   status.close()
-  live.stop()
   status.reset()
   status.set("watcher", { state = "stopped", root = history_root })
   keymaps.clear()
@@ -470,9 +466,7 @@ function M.setup(opts)
     open = M.show_diff,
     preview = M.preview,
     browse = function()
-      if follow.state().window == "current" then
-        follow.pause("timeline")
-      end
+      yield_follow("timeline")
     end,
   })
   vim.api.nvim_create_user_command("AgentLensFilter", function(cmd)
@@ -485,19 +479,9 @@ function M.setup(opts)
     desc = "Filter retained activity",
   })
 
-  vim.api.nvim_create_user_command(
-    "AgentLensPause",
-    M.pause_follow,
-    { desc = "Pause Follow Agent" }
-  )
-  vim.api.nvim_create_user_command(
-    "AgentLensResume",
-    M.resume_follow,
-    { desc = "Resume Follow Agent" }
-  )
-  if config.options.keymaps.resume and config.options.keymaps.resume ~= "" then
-    keymaps.set(config.options.keymaps.resume, M.resume_follow, { desc = "Resume Follow Agent" })
-  end
+  register_action_command("AgentLensPause", "pause_follow", "Pause Follow Agent")
+  register_action_command("AgentLensResume", "resume_follow", "Resume Follow Agent")
+  register_keymap("resume", "resume_follow", "Resume Follow Agent")
   vim.api.nvim_create_user_command("AgentLensFollowMode", function(cmd)
     local mode = cmd.args ~= "" and cmd.args
       or (follow.state().window == "current" and "split" or "current")
@@ -537,17 +521,8 @@ function M.setup(opts)
   register_action_command("AgentLensFollow", "toggle_follow", "Toggle agent-lens Follow Agent")
   register_action_command("AgentLensClose", "close_all", "Close all agent-lens windows")
 
-  -- Register global keymaps
-  if config.options.keymaps.toggle and config.options.keymaps.toggle ~= "" then
-    keymaps.set(config.options.keymaps.toggle, function()
-      M.toggle()
-    end, { desc = "Toggle agent-lens" })
-  end
-  if config.options.keymaps.follow and config.options.keymaps.follow ~= "" then
-    keymaps.set(config.options.keymaps.follow, function()
-      M.toggle_follow()
-    end, { desc = "Toggle agent-lens Follow Agent" })
-  end
+  register_keymap("toggle", "toggle", "Toggle agent-lens")
+  register_keymap("follow", "toggle_follow", "Toggle agent-lens Follow Agent")
 
   -- Auto-start if enabled
   if config.options.enabled then
@@ -558,8 +533,9 @@ function M.setup(opts)
         return
       end
       -- Only start if we're in a git repo
-      if diff_engine.git_root() then
-        M.start()
+      local root = diff_engine.git_root()
+      if root then
+        M.start(config.options.watch_dir or root)
       end
     end, 500)
   end

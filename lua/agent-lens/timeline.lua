@@ -146,9 +146,7 @@ function M.summary()
       result.unread = result.unread + 1
     end
   end
-  for _ in pairs(files) do
-    result.files = result.files + 1
-  end
+  result.files = vim.tbl_count(files)
   for _, e in pairs(latest) do
     result.added = result.added + e.stats.added
     result.removed = result.removed + e.stats.removed
