@@ -51,7 +51,7 @@ function M.head_contents(root, path)
   if not paths.resolve(root, path, true) then
     return nil
   end
-  local result = git(root, { "show", "HEAD:" .. path })
+  local result = git(root, { "show", "HEAD:./" .. path })
   if result.code ~= 0 or result.stdout:find("%z") then
     return nil
   end
@@ -140,7 +140,7 @@ function M.review(root, path)
   if not has_head(root) then
     return nil, "HEAD baseline unavailable; create the first commit before reviewing"
   end
-  local head = git(root, { "show", "HEAD:" .. path })
+  local head = git(root, { "show", "HEAD:./" .. path })
   local exists = head.code == 0
   if exists and head.stdout:find("%z") then
     return nil, "Binary file cannot be reviewed as text"

@@ -17,7 +17,13 @@ local ok, err = xpcall(function()
   git("config", "user.name", "Test")
   local no_head, message = diff.review(root, "missing.lua")
   assert(no_head == nil and message:find("HEAD", 1, true), "unborn explicit baseline")
-  for _, path in ipairs({ "partial.lua", "deleted.lua", "-flags %.lua", "π :special.lua" }) do
+  for _, path in ipairs({
+    "partial.lua",
+    "deleted.lua",
+    "-flags %.lua",
+    "π :special.lua",
+    ":leading.lua",
+  }) do
     vim.fn.writefile({ "one", "two", "three" }, root .. "/" .. path)
   end
   local f = assert(io.open(root .. "/binary", "wb"))
@@ -31,7 +37,7 @@ local ok, err = xpcall(function()
   assert(diff.review(root, "deleted.lua").status == "deleted")
   vim.fn.writefile({ "new" }, root .. "/untracked.lua")
   assert(diff.review(root, "untracked.lua").status == "added")
-  for _, path in ipairs({ "-flags %.lua", "π :special.lua" }) do
+  for _, path in ipairs({ "-flags %.lua", "π :special.lua", ":leading.lua" }) do
     vim.fn.writefile({ "changed" }, root .. "/" .. path)
     assert(diff.review(root, path).stats.added == 1)
   end
@@ -46,10 +52,15 @@ local ok, err = xpcall(function()
   end
   local files = diff.changed_files(root)
   assert(
-    vim.deep_equal(
-      files,
-      { "-flags %.lua", "binary", "deleted.lua", "partial.lua", "untracked.lua", "π :special.lua" }
-    ),
+    vim.deep_equal(files, {
+      "-flags %.lua",
+      ":leading.lua",
+      "binary",
+      "deleted.lua",
+      "partial.lua",
+      "untracked.lua",
+      "π :special.lua",
+    }),
     "sorted safe NUL paths"
   )
   local linked = vim.fn.tempname()
