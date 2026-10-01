@@ -17,7 +17,6 @@ local reason
 local window = "current"
 local target
 local pending
-local active_call_id
 local finished = {}
 local order = {}
 local notice_generation = 0
@@ -43,6 +42,7 @@ local function notify_control(state)
   end)
 end
 local phases = { progress = "drafting", start = "applying", success = "settled", error = "failed" }
+local active_phases = { progress = true, start = true }
 local function publish()
   status.set("follow", { control = control, window = window, reason = reason })
   status.set("activity", target and {
@@ -86,7 +86,6 @@ function M.setup(opts)
   reason = nil
   target = nil
   pending = nil
-  active_call_id = nil
   finished = {}
   order = {}
   view.setup(opts, function(why, insert)
@@ -175,7 +174,6 @@ function M.record_preview(root, event)
     return false
   end
   pending = vim.deepcopy(event)
-  active_call_id = event.toolCallId
   target = {
     root = root,
     call_id = event.toolCallId,
@@ -203,7 +201,6 @@ function M.preview_disconnected(root, call_id)
   end
   finish(call_id)
   pending = nil
-  active_call_id = nil
   target = nil
   view.clear()
   publish()
@@ -228,12 +225,11 @@ function M.record_location(root, location)
       return
     end
   end
-  if location.phase == "start" or location.phase == "progress" then
+  if active_phases[location.phase] then
     if pending and pending.toolCallId ~= location.call_id then
       pending = nil
     end
     local previous = target
-    active_call_id = location.call_id
     target = vim.tbl_extend("force", {}, location, { root = root })
     if previous and previous.call_id == location.call_id and previous.path == location.path then
       target.line = location.line or previous.line
@@ -242,17 +238,16 @@ function M.record_location(root, location)
     return
   end
   finish(location.call_id)
-  if active_call_id ~= location.call_id then
+  local previous = target
+  if not previous or previous.call_id ~= location.call_id or not active_phases[previous.phase] then
     return
   end
-  local previous = target
   local preview_line = pending and pending.line
-  active_call_id = nil
   pending = nil
   target = vim.tbl_extend("force", {}, location, {
     root = root,
-    path = location.path or (previous and previous.path),
-    line = preview_line or location.line or (previous and previous.line),
+    path = location.path or previous.path,
+    line = preview_line or location.line or previous.line,
   })
   if location.phase == "error" then
     view.clear()
@@ -294,7 +289,6 @@ function M.clear()
   view.clear()
   target = nil
   pending = nil
-  active_call_id = nil
   finished = {}
   order = {}
   reason = nil

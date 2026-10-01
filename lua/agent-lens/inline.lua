@@ -1,6 +1,6 @@
 --- Recent read ranges and Git HEAD-to-disk changes in ordinary file buffers.
 local M = {}
-local uv = vim.uv or vim.loop
+local uv = vim.uv
 local read_ns = vim.api.nvim_create_namespace("agent_lens_read")
 local write_ns = vim.api.nvim_create_namespace("agent_lens_write")
 local reads = {}
@@ -72,17 +72,9 @@ local function render(buf)
   end
 end
 
-local function render_file(path)
+local function render_buffers(path)
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(buf) and file_path(buf) == path then
-      render(buf)
-    end
-  end
-end
-
-local function render_all()
-  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(buf) then
+    if vim.api.nvim_buf_is_loaded(buf) and (not path or file_path(buf) == path) then
       render(buf)
     end
   end
@@ -124,22 +116,30 @@ local function changed_lines(diff)
   return { ranges = ranges, deletions = deletions }
 end
 
+---@param root string
+---@param rel_path string
+---@param range? {start: integer, ["end"]: integer}
+---@param agent string
 function M.record_read(root, rel_path, range, agent)
   local path = uv.fs_realpath(root .. "/" .. rel_path)
   if not path then
     return
   end
   reads[path] = { range = range, agent = agent }
-  render_file(path)
+  render_buffers(path)
 end
 
+---@param root string
+---@param rel_path string
+---@param diff? FileDiff
 function M.record_write(root, rel_path, diff)
   local path = uv.fs_realpath(root .. "/" .. rel_path)
     or ((uv.fs_realpath(root) or root) .. "/" .. rel_path)
   writes[path] = diff and changed_lines(diff) or false
-  render_file(path)
+  render_buffers(path)
 end
 
+---@param opts {enabled: boolean}
 function M.setup(opts)
   enabled = opts.enabled
   vim.api.nvim_set_hl(0, "AgentLensRead", { default = true, link = "DiffChange" })
@@ -150,18 +150,20 @@ function M.setup(opts)
       render(event.buf)
     end,
   })
-  render_all()
+  render_buffers()
 end
 
+---@return boolean
 function M.toggle()
   enabled = not enabled
-  render_all()
+  render_buffers()
   return enabled
 end
 
+--- Clear retained activity and its buffer marks.
 function M.clear()
   reads, writes = {}, {}
-  render_all()
+  render_buffers()
 end
 
 return M

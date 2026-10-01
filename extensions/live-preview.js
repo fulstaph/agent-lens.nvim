@@ -164,6 +164,8 @@ function structuredDraft(input, base) {
 export function createLivePreview(resolveFile) {
   let calls = new Map();
   let peers = new Map();
+  // Newest record a lagging peer has not received; written when its buffer drains.
+  let unsent = new WeakMap();
   let timer;
   let lastScan = 0;
   let scannedRoot;
@@ -201,6 +203,11 @@ export function createLivePreview(resolveFile) {
         const socket = createConnection(path);
         socket.on("error", () => socket.destroy());
         socket.on("close", () => { if (peers.get(path) === socket) peers.delete(path); });
+        socket.on("drain", () => {
+          const record = unsent.get(socket);
+          unsent.delete(socket);
+          if (record && !socket.destroyed) socket.write(record);
+        });
         socket.unref();
         peers.set(path, socket);
       }
@@ -245,9 +252,25 @@ export function createLivePreview(resolveFile) {
     const record = `${JSON.stringify(event)}\n`;
     if (Buffer.byteLength(record) > MAX_BYTES) return;
     for (const socket of peers.values()) {
-      if (!socket.destroyed && socket.writableLength < MAX_BYTES) socket.write(record);
-      else socket.destroy();
+      if (socket.destroyed) continue;
+      // A slow editor skips intermediate snapshots and receives the newest one,
+      // even after finish(), once it drains; closing would read as cancellation.
+      if (socket.writableLength >= MAX_BYTES) {
+        unsent.set(socket, record);
+      } else {
+        unsent.delete(socket);
+        socket.write(record);
+      }
     }
+  }
+
+  function schedule() {
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      for (const pending of calls.values()) flush(pending);
+    }, 25);
+    timer.unref();
   }
 
   return {
@@ -257,13 +280,7 @@ export function createLivePreview(resolveFile) {
       call.toolCall = toolCall;
       call.dirty = true;
       calls.set(toolCall.toolCallId, call);
-      if (!timer) {
-        timer = setTimeout(() => {
-          timer = undefined;
-          for (const pending of calls.values()) flush(pending);
-        }, 25);
-        timer.unref();
-      }
+      schedule();
     },
     finish(toolCallId) {
       const call = calls.get(toolCallId);
@@ -276,6 +293,7 @@ export function createLivePreview(resolveFile) {
       calls = new Map();
       for (const socket of peers.values()) socket.destroy();
       peers = new Map();
+      unsent = new WeakMap();
       scannedRoot = undefined;
       lastScan = 0;
     },

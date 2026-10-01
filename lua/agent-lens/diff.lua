@@ -1,10 +1,55 @@
 --- Safe current HEAD-to-disk comparisons.
 local M = {}
 local paths = require("agent-lens.paths")
-local function git(root, args)
-  local command = { "git", "--literal-pathspecs", "-C", root }
+-- Coroutines started by M.async yield on Git instead of blocking the editor.
+local async_callbacks = {}
+local function resume(thread, ...)
+  local ok, result, err = coroutine.resume(thread, ...)
+  if coroutine.status(thread) ~= "dead" then
+    return
+  end
+  local callback = async_callbacks[thread]
+  async_callbacks[thread] = nil
+  -- Deliver outside the coroutine so callbacks never yield or nest resumes.
+  vim.schedule(function()
+    if ok then
+      callback(result, err)
+    else
+      callback(nil, tostring(result))
+    end
+  end)
+end
+local function git(root, args, opts)
+  opts = opts or {}
+  local command = { "git", "-C", root }
+  if opts.literal ~= false then
+    table.insert(command, 2, "--literal-pathspecs")
+  end
   vim.list_extend(command, args)
-  return vim.system(command, { text = false }):wait()
+  local system_opts = { text = false, stdin = opts.stdin }
+  local thread = coroutine.running()
+  if not (thread and async_callbacks[thread]) then
+    return vim.system(command, system_opts):wait()
+  end
+  local started, err = pcall(vim.system, command, system_opts, function(result)
+    vim.schedule(function()
+      resume(thread, result)
+    end)
+  end)
+  if not started then
+    return { code = -1, stdout = "", stderr = tostring(err) }
+  end
+  return coroutine.yield()
+end
+--- Run a function from this module without blocking the editor.
+--- Git calls inside it yield until their process exits.
+---@param fn fun(...): any, any
+---@param callback fun(result: any, err: string|nil) Scheduled on the main loop
+---@param ... any Arguments for fn
+function M.async(fn, callback, ...)
+  local thread = coroutine.create(fn)
+  async_callbacks[thread] = callback
+  resume(thread, ...)
 end
 local function lines(text)
   if text == "" then
@@ -92,19 +137,19 @@ end
 ---@field stats {added: integer, removed: integer} Line counts
 ---@field raw string[] Raw unified diff lines
 
---- Parse a unified diff into structured hunks.
+--- Parse a unified diff into structured hunks and line counts.
 ---@param diff_lines string[] Raw diff output lines
 ---@return DiffHunk[]
+---@return {added: integer, removed: integer}
 local function parse_hunks(diff_lines)
   local hunks = {}
+  local stats = { added = 0, removed = 0 }
   local current_hunk = nil
 
   for _, line in ipairs(diff_lines) do
+    local prefix = line:sub(1, 1)
     local old_s, old_c, new_s, new_c = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
     if old_s then
-      if current_hunk then
-        hunks[#hunks + 1] = current_hunk
-      end
       current_hunk = {
         old_start = tonumber(old_s),
         old_count = tonumber(old_c) or 1,
@@ -113,18 +158,18 @@ local function parse_hunks(diff_lines)
         header = line,
         lines = {},
       }
-    elseif
-      current_hunk and (line:sub(1, 1) == "+" or line:sub(1, 1) == "-" or line:sub(1, 1) == " ")
-    then
+      hunks[#hunks + 1] = current_hunk
+    elseif current_hunk and (prefix == "+" or prefix == "-" or prefix == " ") then
       current_hunk.lines[#current_hunk.lines + 1] = line
+      if prefix == "+" then
+        stats.added = stats.added + 1
+      elseif prefix == "-" then
+        stats.removed = stats.removed + 1
+      end
     end
   end
 
-  if current_hunk then
-    hunks[#hunks + 1] = current_hunk
-  end
-
-  return hunks
+  return hunks, stats
 end
 
 --- Compute a current safe text comparison, with explicit unavailable errors.
@@ -178,25 +223,15 @@ function M.review(root, path)
       return nil, "Binary file cannot be reviewed as text"
     end
   end
-  local hunks = parse_hunks(raw)
+  local hunks, stats = parse_hunks(raw)
   if #hunks == 0 then
     return nil, "No current text changes"
-  end
-  local added, removed = 0, 0
-  for _, h in ipairs(hunks) do
-    for _, line in ipairs(h.lines) do
-      if line:sub(1, 1) == "+" then
-        added = added + 1
-      elseif line:sub(1, 1) == "-" then
-        removed = removed + 1
-      end
-    end
   end
   return {
     rel_path = path,
     status = not exists and "added" or not disk and "deleted" or "modified",
     hunks = hunks,
-    stats = { added = added, removed = removed },
+    stats = stats,
     raw = raw,
   }
 end
@@ -246,6 +281,45 @@ function M.changed_files(root)
   end
   table.sort(result)
   return result
+end
+--- Paths Git ignores, relative to root. Tracked files are never ignored.
+---@param root string
+---@param candidates string[]
+---@return table<string, boolean>
+function M.ignored(root, candidates)
+  local ignored = {}
+  if #candidates == 0 then
+    return ignored
+  end
+  -- check-ignore reads literal paths from stdin and rejects pathspec magic flags.
+  local result = git(root, { "check-ignore", "-z", "--stdin" }, {
+    literal = false,
+    stdin = table.concat(candidates, "\0") .. "\0",
+  })
+  if result.code == 0 then
+    for path in result.stdout:gmatch("([^%z]+)%z") do
+      ignored[path] = true
+    end
+  end
+  return ignored
+end
+--- Ignored untracked directories under a root-relative directory ("" for all).
+---@param root string
+---@param directory string
+---@return table<string, boolean>
+function M.ignored_directories(root, directory)
+  local args = { "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory" }
+  vim.list_extend(args, { "--", directory ~= "" and directory or "." })
+  local result = git(root, args)
+  local ignored = {}
+  if result.code == 0 then
+    for path in result.stdout:gmatch("([^%z]+)%z") do
+      if path:sub(-1) == "/" then
+        ignored[path:sub(1, -2)] = true
+      end
+    end
+  end
+  return ignored
 end
 --- Current text comparison summaries.
 ---@param root string

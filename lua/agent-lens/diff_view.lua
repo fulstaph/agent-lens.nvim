@@ -190,13 +190,8 @@ local function draw()
   else
     for i, w in ipairs(s.windows) do
       if owned(w) then
-        local contents
-        if i == 1 then
-          contents = diff.head_contents(s.root, s.path)
-        else
-          contents = diff.working_contents(s.root, s.path)
-        end
-        set_lines(w.buf, contents or {})
+        local source = i == 1 and "head_contents" or "working_contents"
+        set_lines(w.buf, diff[source](s.root, s.path) or {})
         vim.wo[w.win].winbar = (i == 1 and "HEAD · " or "disk · ") .. label:gsub("%%", "%%%%")
       end
     end

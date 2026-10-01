@@ -10,6 +10,16 @@ local peers = {}
 local generation = 0
 local MAX_BYTES = 1024 * 1024
 local MAX_LINES = 20000
+local MAX_PEERS = 8
+local MAX_CALL_ID_BYTES = 256
+
+local function count_peers()
+  local count = 0
+  for _ in pairs(peers) do
+    count = count + 1
+  end
+  return count
+end
 
 --- Get the private socket directory shared with the Pi/OMP bridge.
 ---@param root string
@@ -23,7 +33,7 @@ function M.directory(root)
   return tmp .. "/agent-lens-" .. uv.getuid() .. "-" .. vim.fn.sha256(real_root):sub(1, 16)
 end
 
-local function valid_preview(root, event)
+local function validate_preview(root, event)
   if
     type(event) ~= "table"
     or event.v ~= 1
@@ -31,7 +41,7 @@ local function valid_preview(root, event)
     or (event.tool ~= "edit" and event.tool ~= "write")
     or type(event.toolCallId) ~= "string"
     or #event.toolCallId == 0
-    or #event.toolCallId > 256
+    or #event.toolCallId > MAX_CALL_ID_BYTES
     or type(event.sequence) ~= "number"
     or event.sequence % 1 ~= 0
     or event.sequence < 1
@@ -78,17 +88,14 @@ local function close_peer(peer, drain)
   end
   local function finish_close()
     if peers[peer] == state then
-      if state.queued > 0 then
+      if state.scheduled then
         vim.schedule(finish_close)
         return
       end
       peers[peer] = nil
     end
     if state.generation == generation then
-      local count = 0
-      for _ in pairs(peers) do
-        count = count + 1
-      end
+      local count = count_peers()
       local previous = status.get().preview
       status.set("preview", {
         state = count == 0 and "listening" or previous.state,
@@ -136,7 +143,7 @@ function M.start(root)
   end
   uv.fs_chmod(socket_path, 384) -- 0600
   local epoch = generation
-  local listening = server:listen(8, function(err)
+  local listening = server:listen(MAX_PEERS, function(err)
     if err or epoch ~= generation then
       return
     end
@@ -148,15 +155,11 @@ function M.start(root)
       peer:close()
       return
     end
-    local peer_count = 0
-    for _ in pairs(peers) do
-      peer_count = peer_count + 1
-    end
-    if peer_count >= 8 then
+    if count_peers() >= MAX_PEERS then
       peer:close()
       return
     end
-    local state = { root = root, generation = epoch, pending = "", queued = 0 }
+    local state = { root = root, generation = epoch, pending = "", scheduled = false }
     peers[peer] = state
     peer:read_start(function(read_err, chunk)
       if read_err or not chunk then
@@ -164,34 +167,43 @@ function M.start(root)
         return
       end
       state.pending = state.pending .. chunk
+      -- Snapshots are complete states: a slow editor decodes only the newest one.
+      local start, first, last = 1, nil, nil
+      while true do
+        local boundary = state.pending:find("\n", start, true)
+        if not boundary then
+          break
+        end
+        -- Every record is bounded, including skipped ones, before anything is decoded.
+        if boundary - start > MAX_BYTES then
+          close_peer(peer)
+          return
+        end
+        first, last, start = start, boundary - 1, boundary + 1
+      end
+      if first then
+        state.latest = state.pending:sub(first, last)
+        state.pending = state.pending:sub(start)
+      end
       if #state.pending > MAX_BYTES then
         close_peer(peer)
         return
       end
-      while true do
-        local boundary = state.pending:find("\n", 1, true)
-        if not boundary then
-          break
-        end
-        local record = state.pending:sub(1, boundary - 1)
-        state.pending = state.pending:sub(boundary + 1)
-        state.queued = state.queued + #record
-        if state.queued > MAX_BYTES then
-          close_peer(peer)
-          return
-        end
+      if state.latest and not state.scheduled then
+        state.scheduled = true
         vim.schedule(function()
-          state.queued = state.queued - #record
-          if epoch ~= generation or not peers[peer] then
+          state.scheduled = false
+          local record = state.latest
+          state.latest = nil
+          if not record or epoch ~= generation or not peers[peer] then
             return
           end
           local ok, event = pcall(vim.json.decode, record)
-          if ok and valid_preview(root, event) then
-            local count = 0
-            for _ in pairs(peers) do
-              count = count + 1
-            end
-            status.set("preview", { state = "receiving", peers = count, last_valid_at = os.time() })
+          if ok and validate_preview(root, event) then
+            status.set(
+              "preview",
+              { state = "receiving", peers = count_peers(), last_valid_at = os.time() }
+            )
             if follow.record_preview(root, event) then
               state.call_id = event.toolCallId
             end

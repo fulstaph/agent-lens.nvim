@@ -54,9 +54,10 @@ local function send_and_close(records)
       end)
     end)
   end)
+  -- One coalesced decode of the newest snapshot, then the EOF drain.
   assert(
     vim.wait(2000, function()
-      return #queue >= #records + 1
+      return #queue >= 2
     end, 10),
     "socket data and EOF must arrive before decoding"
   )

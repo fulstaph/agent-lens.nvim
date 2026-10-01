@@ -16,23 +16,62 @@ local M = {}
 ---@field edits integer
 ---@field unread integer
 ---@field stats? {added: integer, removed: integer}
-local function matches(e, filter)
-  return filter == "all" or (filter == "reads") == (e.kind == "read")
+local function matches(entry, filter)
+  return filter == "all" or (filter == "reads") == (entry.kind == "read")
 end
-local function event_row(e, depth, unread)
+local function event_row(entry, depth, unread)
   return {
-    key = "event:" .. e.id,
+    key = "event:" .. entry.id,
     kind = "event",
-    path = e.rel_path,
-    entry = e,
-    event_ids = { e.id },
+    path = entry.rel_path,
+    entry = entry,
+    event_ids = { entry.id },
     depth = depth,
-    reads = e.kind == "read" and 1 or 0,
-    edits = e.kind == "read" and 0 or 1,
-    unread = unread[e.id] and 1 or 0,
-    stats = e.kind ~= "read" and e.stats or nil,
+    reads = entry.kind == "read" and 1 or 0,
+    edits = entry.kind == "read" and 0 or 1,
+    unread = unread[entry.id] and 1 or 0,
+    stats = entry.kind ~= "read" and entry.stats or nil,
   }
 end
+
+-- Entries are newest first, so groups retain the latest matching edit's stats.
+local function group_by_file(entries, filter, unread)
+  local groups, ordered = {}, {}
+  for _, entry in ipairs(entries) do
+    if matches(entry, filter) then
+      local group = groups[entry.rel_path]
+      if not group then
+        group = {
+          key = "file:" .. entry.rel_path,
+          kind = "file",
+          path = entry.rel_path,
+          entry = entry,
+          event_ids = {},
+          depth = 0,
+          reads = 0,
+          edits = 0,
+          unread = 0,
+          children = {},
+        }
+        groups[entry.rel_path] = group
+        ordered[#ordered + 1] = group
+      end
+      group.event_ids[#group.event_ids + 1] = entry.id
+      group.children[#group.children + 1] = entry
+      local category = entry.kind == "read" and "reads" or "edits"
+      group[category] = group[category] + 1
+      if category == "edits" and not group.stats then
+        group.stats = entry.stats
+        group.entry = entry
+      end
+      if unread[entry.id] then
+        group.unread = group.unread + 1
+      end
+    end
+  end
+  return ordered
+end
+
 --- Project retained events, newest first, into stable file/event rows.
 ---@param entries TimelineEntry[]
 ---@param opts PanelOptions
@@ -43,55 +82,22 @@ function M.project(entries, opts, unread)
   table.sort(ordered, function(a, b)
     return a.id > b.id
   end)
-  local rows, groups, group_order = {}, {}, {}
-  for _, e in ipairs(ordered) do
-    if matches(e, opts.filter) then
-      if opts.view == "events" then
-        if not opts.unread_only or unread[e.id] then
-          rows[#rows + 1] = event_row(e, 0, unread)
-        end
-      else
-        local g = groups[e.rel_path]
-        if not g then
-          g = {
-            key = "file:" .. e.rel_path,
-            kind = "file",
-            path = e.rel_path,
-            entry = e,
-            event_ids = {},
-            depth = 0,
-            reads = 0,
-            edits = 0,
-            unread = 0,
-            children = {},
-          }
-          groups[e.rel_path] = g
-          group_order[#group_order + 1] = g
-        end
-        g.event_ids[#g.event_ids + 1] = e.id
-        g.children[#g.children + 1] = e
-        if e.kind == "read" then
-          g.reads = g.reads + 1
-        else
-          g.edits = g.edits + 1
-          if not g.stats then
-            g.stats = e.stats
-            g.entry = e
-          end
-        end
-        if unread[e.id] then
-          g.unread = g.unread + 1
-        end
+  local rows = {}
+  if opts.view == "events" then
+    for _, entry in ipairs(ordered) do
+      if matches(entry, opts.filter) and (not opts.unread_only or unread[entry.id]) then
+        rows[#rows + 1] = event_row(entry, 0, unread)
       end
     end
+    return rows
   end
-  for _, g in ipairs(group_order) do
-    if not opts.unread_only or g.unread > 0 then
-      rows[#rows + 1] = g
-      if opts.expanded[g.path] then
-        for _, e in ipairs(g.children) do
-          if not opts.unread_only or unread[e.id] then
-            rows[#rows + 1] = event_row(e, 1, unread)
+  for _, group in ipairs(group_by_file(ordered, opts.filter, unread)) do
+    if not opts.unread_only or group.unread > 0 then
+      rows[#rows + 1] = group
+      if opts.expanded[group.path] then
+        for _, entry in ipairs(group.children) do
+          if not opts.unread_only or unread[entry.id] then
+            rows[#rows + 1] = event_row(entry, 1, unread)
           end
         end
       end

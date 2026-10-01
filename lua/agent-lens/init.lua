@@ -59,23 +59,12 @@ local BINARY_EXTS = {
   a = true,
 }
 
---- Handle a file change event from the watcher.
----@param rel_path string Relative path from project root
----@param events table Event flags from libuv
-local function on_file_change(rel_path, events)
-  if not M._root then
-    return
-  end
-
-  -- Skip binary files (quick heuristic: check extension)
-  local ext = rel_path:match("%.([^.]+)$")
-  if ext and BINARY_EXTS[ext:lower()] then
-    return
-  end
-
-  -- Compute diff
-  local file_diff = diff_engine.file_diff(M._root, rel_path)
-
+--- Record one computed change in the timeline and editor views.
+---@param root string
+---@param change {rel_path: string, events: table}
+---@param file_diff FileDiff|nil
+local function apply_change(root, change, file_diff)
+  local rel_path, events = change.rel_path, change.events
   if events.deleted then
     timeline.add({
       rel_path = rel_path,
@@ -105,9 +94,85 @@ local function on_file_change(rel_path, events)
   end
 
   -- Hydrate Follow drafts before checktime can prompt about a newly created file.
-  follow.file_changed(M._root, rel_path)
+  follow.file_changed(root, rel_path)
   vim.cmd("silent! checktime")
-  inline.record_write(M._root, rel_path, not events.deleted and file_diff or nil)
+  inline.record_write(root, rel_path, not events.deleted and file_diff or nil)
+end
+
+-- Watcher changes are diffed one at a time, in arrival order, without blocking
+-- the editor. A path queued again before it is processed keeps one slot.
+local change_epoch = 0
+local queued, queued_by_path, draining = {}, {}, false
+
+local function reset_changes()
+  change_epoch = change_epoch + 1
+  queued, queued_by_path, draining = {}, {}, false
+end
+
+local function drain_changes()
+  if draining or #queued == 0 or not M._root then
+    return
+  end
+  draining = true
+  local root, epoch, batch = M._root, change_epoch, queued
+  queued, queued_by_path = {}, {}
+  local candidates = {}
+  for i, change in ipairs(batch) do
+    candidates[i] = change.rel_path
+  end
+  diff_engine.async(diff_engine.ignored, function(ignored)
+    local index = 0
+    local function next_change()
+      if epoch ~= change_epoch then
+        return
+      end
+      index = index + 1
+      local change = batch[index]
+      if not change then
+        draining = false
+        return drain_changes()
+      end
+      if ignored and ignored[change.rel_path] then
+        return next_change()
+      end
+      diff_engine.async(diff_engine.review, function(file_diff)
+        if epoch ~= change_epoch then
+          return
+        end
+        local ok, err = pcall(apply_change, root, change, file_diff)
+        if not ok then
+          vim.notify("[agent-lens] Cannot record change: " .. tostring(err), vim.log.levels.ERROR)
+        end
+        next_change()
+      end, root, change.rel_path)
+    end
+    next_change()
+  end, root, candidates)
+end
+
+--- Handle a file change event from the watcher.
+---@param rel_path string Relative path from project root
+---@param events table Event flags from libuv
+local function on_file_change(rel_path, events)
+  if not M._root then
+    return
+  end
+
+  -- Skip binary files (quick heuristic: check extension)
+  local ext = rel_path:match("%.([^.]+)$")
+  if ext and BINARY_EXTS[ext:lower()] then
+    return
+  end
+
+  local change = queued_by_path[rel_path]
+  if change then
+    change.events = events
+    return
+  end
+  change = { rel_path = rel_path, events = events }
+  queued_by_path[rel_path] = change
+  queued[#queued + 1] = change
+  drain_changes()
 end
 
 --- Start watching the project for file changes.
@@ -126,8 +191,17 @@ function M.start(root)
   end
   history_root = root
   M._root = root
+  reset_changes()
 
-  watcher.start(root, on_file_change)
+  watcher.start(root, on_file_change, {
+    -- Startup scans wait for the answer; new directories ask without blocking.
+    ignored_directories = function(rel_dir, done)
+      if not done then
+        return diff_engine.ignored_directories(root, rel_dir)
+      end
+      diff_engine.async(diff_engine.ignored_directories, done, root, rel_dir)
+    end,
+  })
   status.set("watcher", { state = watcher.is_running() and "running" or "stopped", root = root })
   if config.options.reads.enabled or follow.is_enabled() then
     read_events.start(root)
@@ -142,6 +216,7 @@ end
 --- Stop watching.
 function M.stop()
   generation = generation + 1
+  reset_changes()
   live.stop()
   watcher.stop()
   read_events.stop()
@@ -284,13 +359,10 @@ local function open_read(entry, root)
   end
   return true
 end
---- Open a current comparison or stored successful-read range.
----@param entry? TimelineEntry
----@return boolean
-function M.show_diff(entry)
+local function open_entry(entry, method, missing_message)
   entry = selected_or_current(entry)
   if not entry then
-    vim.notify("[agent-lens] No review target", vim.log.levels.INFO)
+    vim.notify("[agent-lens] " .. missing_message, vim.log.levels.INFO)
     return false
   end
   pause_for_review()
@@ -298,23 +370,19 @@ function M.show_diff(entry)
   if entry.kind == "read" then
     return open_read(entry, root)
   end
-  return diff_view.open(entry, { root = root })
+  return diff_view[method](entry, { root = root })
+end
+--- Open a current comparison or stored successful-read range.
+---@param entry? TimelineEntry
+---@return boolean
+function M.show_diff(entry)
+  return open_entry(entry, "open", "No review target")
 end
 --- Preview the selected/current edit's first hunk, or open a read range.
 ---@param entry? TimelineEntry
 ---@return boolean
 function M.preview(entry)
-  entry = selected_or_current(entry)
-  if not entry then
-    vim.notify("[agent-lens] No preview target", vim.log.levels.INFO)
-    return false
-  end
-  pause_for_review()
-  local root = M._root or read_events.root() or diff_engine.git_root()
-  if entry.kind == "read" then
-    return open_read(entry, root)
-  end
-  return diff_view.preview(entry, { root = root })
+  return open_entry(entry, "preview", "No preview target")
 end
 
 --- Close all agent-lens windows.
@@ -335,10 +403,17 @@ function M.clear()
   vim.notify("[agent-lens] Timeline cleared", vim.log.levels.INFO)
 end
 
+local function register_action_command(name, method, description)
+  vim.api.nvim_create_user_command(name, function()
+    M[method]()
+  end, { desc = description })
+end
+
 --- Setup the plugin.
 ---@param opts? AgentLensOpts
 function M.setup(opts)
   generation = generation + 1
+  reset_changes()
   watcher.stop()
   read_events.stop()
   M._root = nil
@@ -399,34 +474,22 @@ function M.setup(opts)
     end,
     desc = "Choose Follow window mode",
   })
-  vim.api.nvim_create_user_command("AgentLensPreview", function()
-    M.preview()
-  end, { desc = "Preview a current hunk or read range" })
+  register_action_command("AgentLensPreview", "preview", "Preview a current hunk or read range")
   -- Register user commands
   vim.api.nvim_create_user_command(
     "AgentLensStatus",
     status.open,
     { desc = "Show observed Agent Lens status" }
   )
-  vim.api.nvim_create_user_command("AgentLens", function()
-    M.toggle()
-  end, { desc = "Toggle agent-lens timeline" })
+  register_action_command("AgentLens", "toggle", "Toggle agent-lens timeline")
 
   vim.api.nvim_create_user_command("AgentLensStart", function(cmd)
     M.start(cmd.args ~= "" and cmd.args or nil)
   end, { nargs = "?", desc = "Start agent-lens watcher" })
 
-  vim.api.nvim_create_user_command("AgentLensStop", function()
-    M.stop()
-  end, { desc = "Stop agent-lens watcher" })
-
-  vim.api.nvim_create_user_command("AgentLensClear", function()
-    M.clear()
-  end, { desc = "Clear agent-lens timeline" })
-
-  vim.api.nvim_create_user_command("AgentLensDiff", function()
-    M.show_diff()
-  end, { desc = "Open diff for selected entry" })
+  register_action_command("AgentLensStop", "stop", "Stop agent-lens watcher")
+  register_action_command("AgentLensClear", "clear", "Clear agent-lens timeline")
+  register_action_command("AgentLensDiff", "show_diff", "Open diff for selected entry")
   vim.api.nvim_create_user_command("AgentLensInlineToggle", function()
     local visible = inline.toggle()
     vim.notify(
@@ -434,13 +497,8 @@ function M.setup(opts)
       vim.log.levels.INFO
     )
   end, { desc = "Toggle agent-lens activity in file buffers" })
-  vim.api.nvim_create_user_command("AgentLensFollow", function()
-    M.toggle_follow()
-  end, { desc = "Toggle agent-lens Follow Agent" })
-
-  vim.api.nvim_create_user_command("AgentLensClose", function()
-    M.close_all()
-  end, { desc = "Close all agent-lens windows" })
+  register_action_command("AgentLensFollow", "toggle_follow", "Toggle agent-lens Follow Agent")
+  register_action_command("AgentLensClose", "close_all", "Close all agent-lens windows")
 
   -- Register global keymaps
   if config.options.keymaps.toggle and config.options.keymaps.toggle ~= "" then
@@ -469,11 +527,11 @@ function M.setup(opts)
     end, 500)
   end
 
-  -- Auto-reload open buffers when files change externally
+  -- Auto-reload open buffers when files change externally while watching
   vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "CursorHold" }, {
     group = vim.api.nvim_create_augroup("AgentLensAutoRead", { clear = true }),
     callback = function()
-      if vim.fn.getcmdwintype() == "" then
+      if watcher.is_running() and vim.fn.getcmdwintype() == "" then
         vim.cmd("silent! checktime")
       end
     end,
