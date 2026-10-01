@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.1.0 — 2026-10-02
+
+Improve watcher responsiveness, review correctness, and live-preview reliability.
+
 - Keep retained reviews bound to the watched root after stop and working-directory changes.
 - Rebase Pi/OMP metadata and live previews for subdirectory watches; ignore targets outside the watched directory and discover sockets using the repository root.
 - Auto-open reviews consume asynchronously fetched comparisons and contents; filesystem callbacks never recompute Git synchronously.
@@ -19,6 +23,7 @@
 - Restore Follow's input detection after a render error, and keep it suppressed during nested reveal frames.
 - Truncate `<git-dir>/agent-lens/reads.jsonl` once it exceeds 4 MiB.
 - Only run the `checktime` autocmds while watching.
+- Share record validators, remove redundant controller state, and reduce repeated work in preview rendering and motion while preserving the public API.
 
 ## v0.1.0-beta.1 — 2026-10-01
 
