@@ -360,3 +360,20 @@ Verifies Neovim version, libuv availability, git, git repo detection, and watche
 ## License
 
 [MIT](LICENSE)
+
+Observed status
+---------------
+:AgentLensStatus shows watched root, Follow control/activity, and separate
+metadata/preview channels. Missing logs mean waiting; a socket with no peers
+means listening. Neither proves that an agent host is running. Validated data
+advances receipt time; :AgentLensStart retries errors.
+
+require("agent-lens").status() returns a copied metadata-only StatusSnapshot:
+watcher {state, root}, follow {control, window, reason}, activity
+{phase, tool, path, line, call_id}, metadata/preview {state, last_valid_at, error},
+plus preview peers. Draft bodies never appear here. Compact activity labels
+are Reading, Drafting, Applying, Settled, Failed, and Waiting; Paused takes
+precedence. Integrate optionally with
+%{v:lua.require('agent-lens').statusline()} (percent paths are escaped).
+User AgentLensStatusChanged fires once for coalesced observable changes.
+Status never replaces your statusline or winbar.

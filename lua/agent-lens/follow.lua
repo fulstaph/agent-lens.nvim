@@ -1,5 +1,6 @@
 --- Zed-style live navigation to the active agent location.
 local config = require("agent-lens.config")
+local status = require("agent-lens.status")
 local motion = require("agent-lens.motion")
 
 local M = {}
@@ -33,6 +34,19 @@ function M.target_path(root, rel_path, allow_missing)
   return require("agent-lens.paths").resolve(root, rel_path, allow_missing)
 end
 local target_path = M.target_path
+
+local function publish()
+  status.set("follow", { control = enabled and "following" or "off", window = "current" })
+  local phases =
+    { progress = "drafting", success = "settled", error = "failed", start = "applying" }
+  status.set("activity", target and {
+    phase = target.tool == "read" and target.phase == "start" and "reading" or phases[target.phase],
+    tool = target.tool,
+    path = target.path,
+    line = target.line,
+    call_id = target.call_id,
+  } or { phase = "idle" })
+end
 
 local function file_version(path)
   local stat = uv.fs_stat(path)
@@ -265,6 +279,7 @@ local function label_for(current)
 end
 
 local function render()
+  publish()
   if not enabled or not target or not target.path then
     return false
   end
@@ -335,6 +350,7 @@ function M.setup(opts)
   warned_split = false
   finished_calls = {}
   finished_order = {}
+  publish()
 end
 
 --- Display a validated in-memory draft without editing source buffers or disk.
@@ -494,6 +510,7 @@ function M.record_location(root, location)
     active_call_id = nil
     target = nil
     clear_mark()
+    status.set("activity", { phase = "failed", tool = location.tool, call_id = location.call_id })
     return
   end
 
@@ -539,11 +556,13 @@ function M.toggle()
     clear_preview()
     clear_mark()
   end
+  publish()
   return enabled
 end
 
 ---@return boolean
 function M.is_enabled()
+  publish()
   return enabled
 end
 
@@ -555,6 +574,7 @@ function M.clear()
   clear_mark()
   finished_calls = {}
   finished_order = {}
+  publish()
 end
 
 return M

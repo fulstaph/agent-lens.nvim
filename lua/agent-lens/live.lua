@@ -2,6 +2,7 @@
 local follow = require("agent-lens.follow")
 local config = require("agent-lens.config")
 local uv = vim.uv
+local status = require("agent-lens.status")
 local M = {}
 local server
 local socket_path
@@ -73,6 +74,18 @@ local function close_peer(peer)
     peer:close()
   end
   vim.schedule(function()
+    if state.generation == generation then
+      local count = 0
+      for _ in pairs(peers) do
+        count = count + 1
+      end
+      local previous = status.get().preview
+      status.set("preview", {
+        state = count == 0 and "listening" or previous.state,
+        peers = count,
+        last_valid_at = previous.last_valid_at,
+      })
+    end
     if state.generation == generation and state.call_id then
       follow.preview_disconnected(state.root, state.call_id)
     end
@@ -93,6 +106,7 @@ function M.start(root)
   uv.fs_mkdir(directory, 448) -- 0700: only the current user can connect.
   local stat = uv.fs_lstat(directory)
   if not stat or stat.type ~= "directory" or stat.uid ~= uv.getuid() or stat.mode % 64 ~= 0 then
+    status.set("preview", { state = "error", error = "Private directory unavailable" })
     vim.notify("[agent-lens] Cannot use private live-preview directory", vim.log.levels.WARN)
     return
   end
@@ -101,6 +115,7 @@ function M.start(root)
   local bound = server and server:bind(socket_path)
   if not bound then
     M.stop()
+    status.set("preview", { state = "error", error = "Socket bind failed" })
     vim.notify("[agent-lens] Cannot start live-preview socket", vim.log.levels.WARN)
     return
   end
@@ -157,6 +172,11 @@ function M.start(root)
           end
           local ok, event = pcall(vim.json.decode, record)
           if ok and valid_preview(root, event) then
+            local count = 0
+            for _ in pairs(peers) do
+              count = count + 1
+            end
+            status.set("preview", { state = "receiving", peers = count, last_valid_at = os.time() })
             if follow.record_preview(root, event) then
               state.call_id = event.toolCallId
             end
@@ -167,13 +187,17 @@ function M.start(root)
   end)
   if not listening then
     M.stop()
+    status.set("preview", { state = "error", error = "Socket listen failed" })
     vim.notify("[agent-lens] Cannot listen for live previews", vim.log.levels.WARN)
+  else
+    status.set("preview", { state = "listening", peers = 0 })
   end
 end
 
 --- Close receivers and remove this instance's socket.
 function M.stop()
   generation = generation + 1
+  status.set("preview", { state = "disabled" })
   local active = peers
   peers = {}
   for peer, state in pairs(active) do

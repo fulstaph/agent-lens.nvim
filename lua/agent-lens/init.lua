@@ -23,6 +23,7 @@ local inline = require("agent-lens.inline")
 local follow = require("agent-lens.follow")
 local live = require("agent-lens.live")
 
+local status = require("agent-lens.status")
 local M = {}
 
 ---@type string|nil Git root of the watched project
@@ -117,6 +118,7 @@ function M.start(root)
   M._root = root
 
   watcher.start(root, on_file_change)
+  status.set("watcher", { state = watcher.is_running() and "running" or "stopped", root = root })
   if config.options.reads.enabled or follow.is_enabled() then
     read_events.start(root)
   end
@@ -134,6 +136,7 @@ function M.stop()
   read_events.stop()
   follow.clear()
   M._root = nil
+  status.set("watcher", { state = "stopped" })
   vim.notify("[agent-lens] Stopped watching", vim.log.levels.INFO)
 end
 
@@ -207,6 +210,7 @@ end
 function M.close_all()
   diff_view.close()
   panel.close()
+  status.close()
 end
 
 --- Clear the timeline.
@@ -224,11 +228,17 @@ end
 ---@param opts? AgentLensOpts
 function M.setup(opts)
   live.stop()
+  status.reset()
   config.setup(opts)
   inline.setup(config.options.inline)
   follow.setup(config.options.follow)
 
   -- Register user commands
+  vim.api.nvim_create_user_command(
+    "AgentLensStatus",
+    status.open,
+    { desc = "Show observed Agent Lens status" }
+  )
   vim.api.nvim_create_user_command("AgentLens", function()
     M.toggle()
   end, { desc = "Toggle agent-lens timeline" })
@@ -299,6 +309,15 @@ function M.setup(opts)
     group = vim.api.nvim_create_augroup("AgentLensLiveCleanup", { clear = true }),
     callback = live.stop,
   })
+end
+
+---@return StatusSnapshot
+function M.status()
+  return status.get()
+end
+---@return string
+function M.statusline()
+  return status.statusline()
 end
 
 return M

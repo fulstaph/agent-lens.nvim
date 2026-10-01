@@ -100,6 +100,9 @@ jobs:
             -c "lua local d = require('agent-lens.diff'); local root = d.git_root(); assert(root, 'no git root'); local fd = d.file_diff(root, 'test.txt'); assert(fd, 'no diff'); assert(fd.stats.added >= 1, 'added lines'); assert(#fd.hunks >= 1, 'hunks'); print('OK: diff engine')" \
             -c "qa!"
 
+      - name: Observable activity and bridge status
+        run: nvim --headless -u NONE -l tests/status.lua
+
       - name: Safe repository paths
         run: nvim --headless -u NONE -l tests/paths.lua
 
