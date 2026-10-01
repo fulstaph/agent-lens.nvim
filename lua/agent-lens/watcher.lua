@@ -15,7 +15,19 @@ local M = {}
 ---@type AgentLensWatcher|nil
 M._instance = nil
 
-local uv = vim.uv or vim.loop
+local uv = vim.uv
+
+local function remove_watcher(watcher, dir)
+  local handle = watcher.watchers[dir]
+  if not handle then
+    return
+  end
+  if not handle:is_closing() then
+    handle:stop()
+    handle:close()
+  end
+  watcher.watchers[dir] = nil
+end
 
 --- Check if a path matches any ignore pattern.
 ---@param path string Relative path from root
@@ -76,47 +88,35 @@ local function schedule_debounce(watcher, full_path, rel_path, events)
   )
 end
 
---- Scan a directory and attach watchers to all subdirectories.
----@param watcher AgentLensWatcher
----@param dir string
-local function watch_dir_recursive(watcher, dir)
-  if not watcher.running or watcher.watchers[dir] then
-    return
-  end
-
+---@return boolean|nil nil if allocation fails, false if start fails
+local function attach_watcher(watcher, dir, recursive, on_directory)
   local handle = uv.new_fs_event()
   if not handle then
-    return
+    return nil
   end
 
   local ok = handle:start(
     dir,
-    { recursive = false },
+    { recursive = recursive },
     vim.schedule_wrap(function(err, filename, events)
       if not watcher.running or err or not filename then
-        local h = watcher.watchers[dir]
-        if h then
-          if not h:is_closing() then
-            h:stop()
-            h:close()
-          end
-          watcher.watchers[dir] = nil
-        end
+        remove_watcher(watcher, dir)
         return
       end
 
       local full_path = dir .. "/" .. filename
-      local rel_path = full_path:sub(#watcher.root + 2)
+      local rel_path = recursive and filename or full_path:sub(#watcher.root + 2)
 
       if is_ignored(rel_path, config.options.filter.ignore_patterns) then
         return
       end
 
-      -- Check if it's a new directory — if so, watch it too
-      local stat = uv.fs_stat(full_path)
-      if stat and stat.type == "directory" then
-        watch_dir_recursive(watcher, full_path)
-        return
+      if on_directory then
+        local stat = uv.fs_stat(full_path)
+        if stat and stat.type == "directory" then
+          on_directory(watcher, full_path)
+          return
+        end
       end
 
       schedule_debounce(watcher, full_path, rel_path, events)
@@ -125,8 +125,22 @@ local function watch_dir_recursive(watcher, dir)
 
   if ok then
     watcher.watchers[dir] = handle
-  else
-    handle:close()
+    return true
+  end
+  handle:close()
+  return false
+end
+
+--- Scan a directory and attach watchers to all subdirectories.
+---@param watcher AgentLensWatcher
+---@param dir string
+local function watch_dir_recursive(watcher, dir)
+  if not watcher.running or watcher.watchers[dir] then
+    return
+  end
+  -- A missing handle skips this subtree; a failed start still scans its children.
+  if attach_watcher(watcher, dir, false, watch_dir_recursive) == nil then
+    return
   end
 
   -- Recurse into subdirectories
@@ -166,41 +180,8 @@ function M.start(root, on_change)
   -- On macOS, libuv supports recursive watching natively via FSEvents.
   -- Use a single recursive watcher for the root on macOS; fallback to per-dir on Linux.
   if jit and jit.os == "OSX" then
-    local handle = uv.new_fs_event()
-    if handle then
-      local ok = handle:start(
-        root,
-        { recursive = true },
-        vim.schedule_wrap(function(err, filename, events)
-          if not watcher.running or err or not filename then
-            local h = watcher.watchers[root]
-            if h then
-              if not h:is_closing() then
-                h:stop()
-                h:close()
-              end
-              watcher.watchers[root] = nil
-            end
-            return
-          end
-
-          if is_ignored(filename, config.options.filter.ignore_patterns) then
-            return
-          end
-
-          local full_path = root .. "/" .. filename
-
-          schedule_debounce(watcher, full_path, filename, events)
-        end)
-      )
-
-      if ok then
-        watcher.watchers[root] = handle
-      else
-        handle:close()
-        -- Fallback to per-dir
-        watch_dir_recursive(watcher, root)
-      end
+    if attach_watcher(watcher, root, true) == false then
+      watch_dir_recursive(watcher, root)
     end
   else
     watch_dir_recursive(watcher, root)
@@ -212,27 +193,23 @@ end
 
 --- Stop the active watcher and clean up all handles.
 function M.stop()
-  local w = M._instance
-  if not w then
+  local watcher = M._instance
+  if not watcher then
     return
   end
 
-  w.running = false
+  watcher.running = false
 
-  for path, handle in pairs(w.watchers) do
-    if not handle:is_closing() then
-      handle:stop()
-      handle:close()
-    end
-    w.watchers[path] = nil
+  for dir in pairs(watcher.watchers) do
+    remove_watcher(watcher, dir)
   end
 
-  for path, timer in pairs(w._debounce_timers) do
+  for path, timer in pairs(watcher._debounce_timers) do
     if not timer:is_closing() then
       timer:stop()
       timer:close()
     end
-    w._debounce_timers[path] = nil
+    watcher._debounce_timers[path] = nil
   end
 
   M._instance = nil

@@ -15,16 +15,15 @@ local on_input
 local opts = {}
 local owned
 local window_mode = "current"
-local function owned_bar()
-  if
-    owned
+local function owns_window()
+  return owned
     and vim.api.nvim_win_is_valid(owned.win)
     and vim.api.nvim_win_get_buf(owned.win) == owned.buf
-  then
-    if owned.bar == nil or vim.wo[owned.win].winbar == owned.bar then
-      owned.bar = status.statusline()
-      vim.wo[owned.win].winbar = owned.bar
-    end
+end
+local function owned_bar()
+  if owns_window() and (owned.bar == nil or vim.wo[owned.win].winbar == owned.bar) then
+    owned.bar = status.statusline()
+    vim.wo[owned.win].winbar = owned.bar
   end
 end
 local target
@@ -177,6 +176,23 @@ local function preview_baseline(root, path)
   return lines
 end
 
+local function create_preview(root, event)
+  -- Seed from bounded disk contents, keeping unsaved source buffers independent.
+  local baseline = preview_baseline(root, event.path)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_name(buf, "agent-lens://draft/" .. event.path)
+  vim.b[buf].agent_lens_preview = true
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].modeline = false
+  vim.bo[buf].bufhidden = "hide"
+  vim.bo[buf].undolevels = -1
+  vim.bo[buf].filetype = vim.filetype.match({ filename = root .. "/" .. event.path }) or ""
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, baseline)
+  vim.bo[buf].modified = false
+  vim.bo[buf].modifiable = false
+  return { buf = buf, root = root, path = event.path, call_id = event.toolCallId }
+end
+
 local function is_editor_window(win, target_buf)
   if
     not win
@@ -242,10 +258,7 @@ end
 local function select_window(buf)
   if window_mode == "split" then
     if owned then
-      if
-        not vim.api.nvim_win_is_valid(owned.win)
-        or vim.api.nvim_win_get_buf(owned.win) ~= owned.buf
-      then
+      if not owns_window() then
         owned = nil
         on_input("agent split closed or reused", false)
         return nil
@@ -498,22 +511,8 @@ function M.render(next_target, event)
       clear_preview()
     end
   elseif event and (not preview or preview.sequence ~= event.sequence) then
-    local root = target.root
     if not preview or not vim.api.nvim_buf_is_valid(preview.buf) then
-      -- Seed from bounded disk contents, keeping unsaved source buffers independent.
-      local baseline = preview_baseline(root, event.path)
-      local buf = vim.api.nvim_create_buf(false, true)
-      vim.api.nvim_buf_set_name(buf, "agent-lens://draft/" .. event.path)
-      vim.b[buf].agent_lens_preview = true
-      vim.bo[buf].swapfile = false
-      vim.bo[buf].modeline = false
-      vim.bo[buf].bufhidden = "hide"
-      vim.bo[buf].undolevels = -1
-      vim.bo[buf].filetype = vim.filetype.match({ filename = root .. "/" .. event.path }) or ""
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, baseline)
-      vim.bo[buf].modified = false
-      vim.bo[buf].modifiable = false
-      preview = { buf = buf, root = root, path = event.path, call_id = event.toolCallId }
+      preview = create_preview(target.root, event)
     end
     preview.sequence = event.sequence
     local buf = preview.buf
@@ -575,11 +574,7 @@ function M.current()
   }
 end
 local function release_owned()
-  if
-    owned
-    and vim.api.nvim_win_is_valid(owned.win)
-    and vim.api.nvim_win_get_buf(owned.win) == owned.buf
-  then
+  if owns_window() then
     if not vim.bo[owned.buf].modified and #vim.api.nvim_tabpage_list_wins(owned.tab) > 1 then
       pcall(vim.api.nvim_win_close, owned.win, true)
     elseif owned.bar and vim.wo[owned.win].winbar == owned.bar then

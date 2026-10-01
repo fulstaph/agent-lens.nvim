@@ -92,19 +92,19 @@ end
 ---@field stats {added: integer, removed: integer} Line counts
 ---@field raw string[] Raw unified diff lines
 
---- Parse a unified diff into structured hunks.
+--- Parse a unified diff into structured hunks and line counts.
 ---@param diff_lines string[] Raw diff output lines
 ---@return DiffHunk[]
+---@return {added: integer, removed: integer}
 local function parse_hunks(diff_lines)
   local hunks = {}
+  local stats = { added = 0, removed = 0 }
   local current_hunk = nil
 
   for _, line in ipairs(diff_lines) do
+    local prefix = line:sub(1, 1)
     local old_s, old_c, new_s, new_c = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
     if old_s then
-      if current_hunk then
-        hunks[#hunks + 1] = current_hunk
-      end
       current_hunk = {
         old_start = tonumber(old_s),
         old_count = tonumber(old_c) or 1,
@@ -113,18 +113,18 @@ local function parse_hunks(diff_lines)
         header = line,
         lines = {},
       }
-    elseif
-      current_hunk and (line:sub(1, 1) == "+" or line:sub(1, 1) == "-" or line:sub(1, 1) == " ")
-    then
+      hunks[#hunks + 1] = current_hunk
+    elseif current_hunk and (prefix == "+" or prefix == "-" or prefix == " ") then
       current_hunk.lines[#current_hunk.lines + 1] = line
+      if prefix == "+" then
+        stats.added = stats.added + 1
+      elseif prefix == "-" then
+        stats.removed = stats.removed + 1
+      end
     end
   end
 
-  if current_hunk then
-    hunks[#hunks + 1] = current_hunk
-  end
-
-  return hunks
+  return hunks, stats
 end
 
 --- Compute a current safe text comparison, with explicit unavailable errors.
@@ -178,25 +178,15 @@ function M.review(root, path)
       return nil, "Binary file cannot be reviewed as text"
     end
   end
-  local hunks = parse_hunks(raw)
+  local hunks, stats = parse_hunks(raw)
   if #hunks == 0 then
     return nil, "No current text changes"
-  end
-  local added, removed = 0, 0
-  for _, h in ipairs(hunks) do
-    for _, line in ipairs(h.lines) do
-      if line:sub(1, 1) == "+" then
-        added = added + 1
-      elseif line:sub(1, 1) == "-" then
-        removed = removed + 1
-      end
-    end
   end
   return {
     rel_path = path,
     status = not exists and "added" or not disk and "deleted" or "modified",
     hunks = hunks,
-    stats = { added = added, removed = removed },
+    stats = stats,
     raw = raw,
   }
 end

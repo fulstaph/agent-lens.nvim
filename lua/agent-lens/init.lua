@@ -284,13 +284,10 @@ local function open_read(entry, root)
   end
   return true
 end
---- Open a current comparison or stored successful-read range.
----@param entry? TimelineEntry
----@return boolean
-function M.show_diff(entry)
+local function open_entry(entry, method, missing_message)
   entry = selected_or_current(entry)
   if not entry then
-    vim.notify("[agent-lens] No review target", vim.log.levels.INFO)
+    vim.notify("[agent-lens] " .. missing_message, vim.log.levels.INFO)
     return false
   end
   pause_for_review()
@@ -298,23 +295,19 @@ function M.show_diff(entry)
   if entry.kind == "read" then
     return open_read(entry, root)
   end
-  return diff_view.open(entry, { root = root })
+  return diff_view[method](entry, { root = root })
+end
+--- Open a current comparison or stored successful-read range.
+---@param entry? TimelineEntry
+---@return boolean
+function M.show_diff(entry)
+  return open_entry(entry, "open", "No review target")
 end
 --- Preview the selected/current edit's first hunk, or open a read range.
 ---@param entry? TimelineEntry
 ---@return boolean
 function M.preview(entry)
-  entry = selected_or_current(entry)
-  if not entry then
-    vim.notify("[agent-lens] No preview target", vim.log.levels.INFO)
-    return false
-  end
-  pause_for_review()
-  local root = M._root or read_events.root() or diff_engine.git_root()
-  if entry.kind == "read" then
-    return open_read(entry, root)
-  end
-  return diff_view.preview(entry, { root = root })
+  return open_entry(entry, "preview", "No preview target")
 end
 
 --- Close all agent-lens windows.
@@ -333,6 +326,12 @@ function M.clear()
     panel.render()
   end
   vim.notify("[agent-lens] Timeline cleared", vim.log.levels.INFO)
+end
+
+local function register_action_command(name, method, description)
+  vim.api.nvim_create_user_command(name, function()
+    M[method]()
+  end, { desc = description })
 end
 
 --- Setup the plugin.
@@ -399,34 +398,22 @@ function M.setup(opts)
     end,
     desc = "Choose Follow window mode",
   })
-  vim.api.nvim_create_user_command("AgentLensPreview", function()
-    M.preview()
-  end, { desc = "Preview a current hunk or read range" })
+  register_action_command("AgentLensPreview", "preview", "Preview a current hunk or read range")
   -- Register user commands
   vim.api.nvim_create_user_command(
     "AgentLensStatus",
     status.open,
     { desc = "Show observed Agent Lens status" }
   )
-  vim.api.nvim_create_user_command("AgentLens", function()
-    M.toggle()
-  end, { desc = "Toggle agent-lens timeline" })
+  register_action_command("AgentLens", "toggle", "Toggle agent-lens timeline")
 
   vim.api.nvim_create_user_command("AgentLensStart", function(cmd)
     M.start(cmd.args ~= "" and cmd.args or nil)
   end, { nargs = "?", desc = "Start agent-lens watcher" })
 
-  vim.api.nvim_create_user_command("AgentLensStop", function()
-    M.stop()
-  end, { desc = "Stop agent-lens watcher" })
-
-  vim.api.nvim_create_user_command("AgentLensClear", function()
-    M.clear()
-  end, { desc = "Clear agent-lens timeline" })
-
-  vim.api.nvim_create_user_command("AgentLensDiff", function()
-    M.show_diff()
-  end, { desc = "Open diff for selected entry" })
+  register_action_command("AgentLensStop", "stop", "Stop agent-lens watcher")
+  register_action_command("AgentLensClear", "clear", "Clear agent-lens timeline")
+  register_action_command("AgentLensDiff", "show_diff", "Open diff for selected entry")
   vim.api.nvim_create_user_command("AgentLensInlineToggle", function()
     local visible = inline.toggle()
     vim.notify(
@@ -434,13 +421,8 @@ function M.setup(opts)
       vim.log.levels.INFO
     )
   end, { desc = "Toggle agent-lens activity in file buffers" })
-  vim.api.nvim_create_user_command("AgentLensFollow", function()
-    M.toggle_follow()
-  end, { desc = "Toggle agent-lens Follow Agent" })
-
-  vim.api.nvim_create_user_command("AgentLensClose", function()
-    M.close_all()
-  end, { desc = "Close all agent-lens windows" })
+  register_action_command("AgentLensFollow", "toggle_follow", "Toggle agent-lens Follow Agent")
+  register_action_command("AgentLensClose", "close_all", "Close all agent-lens windows")
 
   -- Register global keymaps
   if config.options.keymaps.toggle and config.options.keymaps.toggle ~= "" then

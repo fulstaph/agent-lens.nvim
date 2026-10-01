@@ -14,6 +14,7 @@ local root
 local offset = 0
 local warned_open = false
 local MAX_CHUNK = 65536
+local MAX_CALL_ID_BYTES = 256
 
 local function git_dir(project)
   local result = vim.fn.systemlist({ "git", "-C", project, "rev-parse", "--absolute-git-dir" })
@@ -21,10 +22,6 @@ local function git_dir(project)
     return nil
   end
   return result[1]
-end
-
-local function valid_path(path, allow_missing)
-  return follow.target_path(root, path, allow_missing) ~= nil
 end
 
 local function agent_name(value)
@@ -48,7 +45,7 @@ local function read_range(value)
 end
 
 local function deliver_read(event)
-  if not valid_path(event.path, false) then
+  if follow.target_path(root, event.path, false) == nil then
     return
   end
   status.set("metadata", { state = "received", last_valid_at = os.time() })
@@ -77,7 +74,7 @@ local function deliver_location(event)
     or not tools[event.tool]
     or type(event.toolCallId) ~= "string"
     or event.toolCallId == ""
-    or #event.toolCallId > 256
+    or #event.toolCallId > MAX_CALL_ID_BYTES
   then
     return
   end
@@ -101,7 +98,7 @@ local function deliver_location(event)
         event.tool == "edit"
         and (event.phase == "start" or event.phase == "progress" or event.phase == "success")
       )
-    if not valid_path(event.path, allow_missing) then
+    if follow.target_path(root, event.path, allow_missing) == nil then
       return
     end
   end
@@ -196,6 +193,7 @@ function M.start(project)
   )
 end
 
+--- Cancel polling and invalidate callbacks from the previous feed.
 function M.stop()
   generation = generation + 1
   status.set("metadata", { state = "disabled" })
@@ -210,10 +208,12 @@ function M.stop()
   warned_open = false
 end
 
+---@return boolean
 function M.is_running()
   return timer ~= nil
 end
 
+---@return string|nil
 function M.root()
   return root
 end
