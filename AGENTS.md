@@ -20,6 +20,8 @@ lua/agent-lens/
 ├── read_events.lua — JSONL trust boundary for Pi/OMP reads and locations
 ├── inline.lua      — Persistent read-range/write-line extmarks
 ├── follow.lua      — One live agent marker, safe window selection, viewport following
+├── live.lua        — Private local-socket receiver for transient code previews
+├── motion.lua      — Bounded UTF-8 text reveal, caret, and viewport easing
 └── health.lua      — :checkhealth agent-lens
 plugin/
 └── agent-lens.lua  — Autoload stub
@@ -34,6 +36,11 @@ appends correlated repository-relative locations and successful read ranges to
 emit speculative progress metadata; no edit bodies, prompts, or raw deltas are
 stored. Neovim polls complete records, validates them again, and fans them
 into independent timeline, inline, and follow projections.
+`extensions/live-preview.js` separately projects streamed write/edit arguments
+into bounded draft snapshots over private local Unix sockets. Code stays in
+memory, outside the JSONL log; `live.lua` independently validates snapshots
+before `follow.lua` displays a read-only scratch buffer. Tool results restore
+the real source buffer. No source buffer, swap file, or disk file stores drafts.
 The bridge is installable as a dual-host package:
 `omp install github:fulstaph/agent-lens.nvim` or
 `pi install git:github.com/fulstaph/agent-lens.nvim`; use `omp install .` or
@@ -57,6 +64,11 @@ Pi/OMP message_update/tool_call/result → metadata-only JSONL
   → successful read → timeline.add() + inline.record_read()
   → correlated location → follow.record_location()
   → current safe editor window + cursor + one agent_lens_follow extmark
+
+Pi/OMP streamed edit/write arguments → transient local socket
+  → live.lua validates path, sequence, size, and lines
+  → follow.record_preview() → motion.reveal() → read-only draft + generated-column caret
+  → tool_result → real source buffer, or discard failed/cancelled draft
 ```
 
 ### Key types
@@ -101,9 +113,11 @@ bridge package have behavioral tests:
 nvim --headless -u NONE -l tests/read_events.lua
 nvim --headless -u NONE -l tests/follow.lua
 nvim --headless -u NONE -l tests/follow_lifecycle.lua
+nvim --headless -u NONE -l tests/motion.lua
 nvim --headless -u NONE -l tests/watcher.lua
 nvim --headless -u NONE -l tests/inline.lua
 npm run test:extension
+npm run test:live
 npm pack --dry-run --json
 ```
 

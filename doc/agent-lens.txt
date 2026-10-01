@@ -142,21 +142,44 @@ Follow Agent ~
   otherwise special, it reuses a safe window in the current tab or opens a
   non-entered split. Toggle Follow off to navigate independently.
 
-  One marker tracks complete, safe file-section or hunk boundaries. The labels
+  Live code appears in a temporary read-only `agent-lens://draft/...` buffer.
+  The cursor and marker follow generated lines, including partially typed
+  lines. The labels
   are `AGENT · pi · drafting`, `AGENT · pi · applying`, and settled `AGENT · pi`.
   Follow does not switch window focus, force-replace modified buffers, create
   timeline entries, or clear static activity marks.
 
+  Live drafts use a private local Unix socket on macOS and Linux. Contents
+  stay in memory and are never written to the metadata log, source files, or
+  swap files. Draft updates are coalesced every 25 ms and limited to 1 MiB and
+  20,000 lines. Supported inputs are full-file writes, Pi oldText/newText
+  replacements, numeric OMP hashline replacements/insertions, and patch
+  additions or updates with unique context. Other edits follow locations.
+  Set `follow = { enabled = true, preview = false }` for location-only mode.
+  Each Neovim instance has a separate socket, removed on stop or exit.
+
+  Changed text reveals progressively with a generated-column caret and an
+  active-line highlight. Untouched context stays in place; the viewport eases
+  when the caret approaches its edge. Batches catch up within 180 ms, including
+  a final batch received just before success. Set `follow.animation = false`
+  for immediate updates, or adjust `follow.animation_ms` (0-400 ms). Large
+  changes skip the reveal to stay responsive.
+
+  The draft stays visible while execution applies the edit. Success replaces
+  it with the real source buffer; failure, cancellation, or disabling Follow
+  removes it. Unsaved source buffers are preserved.
+
   Progress records are edit-only, carry a positive monotonic `sequence`, and
   are validated again by Neovim. `start` reconciles the speculative target and
-  `tool_result` remains authoritative. Some providers emit one complete delta,
-  so no intermediate animation is fabricated. Unmodified targets refresh from
+  `tool_result` remains authoritative. Some providers emit one complete delta;
+  received text can be revealed visually, but cannot appear before it arrives.
+  Unmodified targets refresh from
   disk through normal Neovim file-reading hooks, including unmodified drafts
   whose files have just been created. A modified draft is kept and reported
   rather than passed to Neovim's file-created prompt. Failed loads are reported
   and can be retried; they do not display a successful marker on an empty
-  buffer. Follow never pastes edit bodies or overwrites unsaved contents. Late
-  completions from older calls are ignored.
+  buffer. Streamed code never modifies source buffers. Late completions and
+  draft snapshots from settled calls are ignored.
 
 In-buffer activity ~
   Enabled by default (`inline = { enabled = true }`). Writes highlight the

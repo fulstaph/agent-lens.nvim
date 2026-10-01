@@ -21,7 +21,7 @@ Filesystem edits need no agent integration. Exact live locations cannot be infer
 - **Live edit timeline** — chronological feed of every file change with `+N / -M` stats
 - **Native Neovim diffs** — `diffthis` side-by-side (HEAD vs working tree) with full Tree-sitter highlighting
 - **In-buffer activity** — recent read ranges and Git `HEAD`-to-disk changed lines are marked without opening the timeline; use `:AgentLensInlineToggle` to hide/show them
-- **Follow Agent** — opt-in Zed-style navigation opens the active Pi/OMP file, marks one current location, and labels safe streamed progress as `drafting`, execution as `applying`, and settled results as `AGENT · pi` without replacing unsaved buffers
+- **Follow Agent** — opt-in Zed-style navigation shows code appearing in a live draft, follows the generated lines, and switches to the saved file after execution without replacing unsaved buffers
 - **Zero agent coupling** — works with Pi, Claude Code, Codex CLI, Copilot CLI, OpenCode, Aider, or a human in another terminal
 - **Fast** — macOS uses native FSEvents recursive watching; Linux uses per-directory `inotify` via libuv; all events debounced
 - **Configurable** — panel position, diff layout, ignore patterns, keymaps, highlight groups
@@ -157,6 +157,9 @@ require("agent-lens").setup({
   },
   follow = {
     enabled = false,            -- Opt in to live Pi/OMP navigation
+    preview = true,             -- Show streamed code in a temporary read-only draft
+    animation = true,           -- Reveal generated text and ease viewport movement
+    animation_ms = 180,         -- Maximum reveal duration per incoming batch
   },
 
   keymaps = {
@@ -239,7 +242,31 @@ sides:
    ```
 3. Trigger a built-in `read`, `edit`, or `write`. Follow Agent shows one
    marker whose label moves from `drafting` to `applying` to settled
-   `AGENT · pi` as correlated lifecycle records arrive.
+   `AGENT · pi` as correlated lifecycle records arrive. When the host streams
+   edit or write arguments, code appears in a temporary read-only draft and
+   the cursor follows the generated lines, including partially typed lines.
+
+Live drafts use a private local Unix socket on macOS and Linux. Draft code
+stays in memory; it is never written to the metadata log, a swap file, or the
+target file. The preview supports full-file writes, Pi `oldText`/`newText`
+replacements, numeric OMP hashline replacements and insertions, and patch
+additions or updates with unique source context. Updates are coalesced every
+25 ms. Drafts are limited to 1 MiB and 20,000 lines; unsupported or ambiguous
+edits fall back to location following. Each Neovim instance has its own socket,
+which is removed when Follow stops or Neovim exits.
+
+The draft stays visible while the tool applies its edit, then Follow opens
+the actual source buffer from disk. A failure or cancelled stream removes
+the draft. Unsaved source buffers keep their text; Follow uses a safe split
+when the current buffer has unsaved edits. Set `follow.preview = false` to
+use location following without a content receiver.
+
+Drafts reveal changed text progressively with a caret at the generated column
+and a highlighted active line. Untouched context stays in place; the viewport
+eases when the caret approaches its edge. Incoming batches catch up within
+180 ms, including a final batch that arrives just before tool completion.
+Set `follow.animation = false` for immediate updates, or adjust
+`follow.animation_ms` (0–400 ms). Large changes skip the reveal to stay responsive.
 
 The streamed bridge reads Pi/OMP `message_update` tool-call arguments but
 emits metadata only at complete, safe file-section or hunk boundaries, never
@@ -247,8 +274,8 @@ per token. `progress` records are edit-only and carry an optional positive
 `line` plus a monotonic `sequence` per tool call. Neovim validates phase,
 tool, sequence, line, repository containment, `.git`, and symlink safety again.
 `start` reconciles speculative metadata, and `tool_result` remains authoritative.
-Some providers expose only one complete delta, so Follow makes one jump rather
-than fabricating animation.
+Some providers expose only one complete delta. Its received content can still
+be revealed visually; code cannot appear before the host sends it.
 
 The extension writes **only repository-relative paths, bounded lifecycle IDs,
 tool names, phases, and optional line/sequence/range metadata** to
@@ -258,12 +285,13 @@ paths, or secrets. The package uses the same bridge through both
 `omp.extensions` and `pi.extensions`; run `npm run test:extension` to verify
 the manifest and privacy contract.
 
-Follow Agent refreshes source buffers only from files on disk, using Neovim's
-normal file-reading hooks. It never pastes streamed edit bodies, adds virtual
-diff lines, or overwrites unsaved buffer contents. A missing draft is not attached
-to Neovim's file-created warning; when its file appears unmodified, Follow loads
-it. If you have unsaved text, Follow keeps that draft and reports the conflict.
-Failed loads are reported rather than presented as successful empty buffers.
+Source buffers refresh from disk using Neovim's normal file-reading hooks.
+Streamed code appears in a separate `agent-lens://draft/…` buffer and never
+overwrites source-buffer contents. Without a content preview, a missing edit
+target can still show a location-only draft; when its file appears unmodified,
+Follow loads it. If you have unsaved text, Follow keeps it and reports the
+conflict. Failed loads are reported rather than presented as successful empty
+buffers.
 
 Follow does not switch window focus, create timeline entries, or clear static
 activity marks. A failed active call clears its marker; a late completion from

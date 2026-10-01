@@ -109,6 +109,9 @@ jobs:
       - name: Follow buffer lifecycle and current-window navigation
         run: nvim --headless -u NONE -l tests/follow_lifecycle.lua
 
+      - name: Live draft animation and viewport behavior
+        run: nvim --headless -u NONE -l tests/motion.lua
+
       - name: Watcher cancellation and restart safety
         run: nvim --headless -u NONE -l tests/watcher.lua
 
@@ -119,3 +122,6 @@ jobs:
         run: |
           npm run test:extension
           npm pack --dry-run --json
+
+      - name: Live code preview bridge and Neovim lifecycle
+        run: npm run test:live

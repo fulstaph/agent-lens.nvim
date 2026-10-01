@@ -21,6 +21,7 @@ local diff_view = require("agent-lens.diff_view")
 local read_events = require("agent-lens.read_events")
 local inline = require("agent-lens.inline")
 local follow = require("agent-lens.follow")
+local live = require("agent-lens.live")
 
 local M = {}
 
@@ -119,6 +120,7 @@ function M.start(root)
   if config.options.reads.enabled or follow.is_enabled() then
     read_events.start(root)
   end
+  live.start(root)
   vim.notify(
     string.format("[agent-lens] Watching %s", vim.fn.fnamemodify(root, ":~")),
     vim.log.levels.INFO
@@ -127,6 +129,7 @@ end
 
 --- Stop watching.
 function M.stop()
+  live.stop()
   watcher.stop()
   read_events.stop()
   follow.clear()
@@ -152,8 +155,14 @@ function M.toggle_follow()
     elseif not read_events.is_running() and M._root then
       read_events.start(M._root)
     end
+    if M._root then
+      live.start(M._root)
+    end
   elseif not config.options.reads.enabled then
     read_events.stop()
+  end
+  if not active then
+    live.stop()
   end
   vim.notify(
     "[agent-lens] Follow Agent " .. (active and "enabled" or "disabled"),
@@ -214,6 +223,7 @@ end
 --- Setup the plugin.
 ---@param opts? AgentLensOpts
 function M.setup(opts)
+  live.stop()
   config.setup(opts)
   inline.setup(config.options.inline)
   follow.setup(config.options.follow)
@@ -284,6 +294,10 @@ function M.setup(opts)
         vim.cmd("silent! checktime")
       end
     end,
+  })
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = vim.api.nvim_create_augroup("AgentLensLiveCleanup", { clear = true }),
+    callback = live.stop,
   })
 end
 

@@ -9,6 +9,7 @@
 ---@field timeline_selected? string Highlight group for selected timeline entry
 ---@field follow? string Highlight group for the active agent line
 ---@field follow_label? string Highlight group for the active agent label
+---@field follow_cursor? string Highlight group for the live drafting caret
 
 ---@class AgentLensKeymaps
 ---@field toggle? string Toggle the timeline panel
@@ -41,7 +42,7 @@
 ---@field agent_name? string Display name for the agent
 ---@field reads? { enabled?: boolean, interval_ms?: integer } Opt-in Pi/OMP read feed
 ---@field inline? { enabled?: boolean } Show recent activity in file buffers
----@field follow? { enabled?: boolean } Navigate the current safe editor window and cursor
+---@field follow? { enabled?: boolean, preview?: boolean, animation?: boolean, animation_ms?: integer } Follow locations and animate transient live drafts
 
 local M = {}
 
@@ -59,7 +60,7 @@ M.defaults = {
   auto_open_diff = false,
   reads = { enabled = false, interval_ms = 100 },
   inline = { enabled = true },
-  follow = { enabled = false },
+  follow = { enabled = false, preview = true, animation = true, animation_ms = 180 },
   highlights = {
     added = "DiffAdd",
     removed = "DiffDelete",
@@ -71,6 +72,7 @@ M.defaults = {
     timeline_selected = "CursorLine",
     follow = "CursorLine",
     follow_label = "DiagnosticInfo",
+    follow_cursor = "DiagnosticInfo",
   },
   keymaps = {
     toggle = "<leader>al",
