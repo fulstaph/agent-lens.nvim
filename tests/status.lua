@@ -26,6 +26,12 @@ local ok, err = pcall(function()
   vim.wait(20)
   assert(changes == 1)
   assert(status.statusline():find("100%%.lua", 1, true))
+  local rendered =
+    vim.api.nvim_eval_statusline("%{%v:lua.require'agent-lens'.statusline()%}", {}).str
+  assert(
+    rendered:find("100%.lua", 1, true) and not rendered:find("100%%.lua", 1, true),
+    "statusline expression renders percent paths"
+  )
   status.set("follow", { control = "paused", window = "current", reason = "navigation" })
   assert(status.compact():find("Paused", 1, true))
   status.set("preview", { state = "error", error = "bind failed" })

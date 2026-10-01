@@ -87,6 +87,10 @@ local function close_peer(peer)
       })
     end
     if state.generation == generation and state.call_id then
+      local feed = require("agent-lens.read_events")
+      if feed.root() == state.root then
+        feed.poll()
+      end
       follow.preview_disconnected(state.root, state.call_id)
     end
   end)

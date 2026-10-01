@@ -25,6 +25,8 @@ local live = require("agent-lens.live")
 
 local status = require("agent-lens.status")
 local M = {}
+local generation = 0
+local history_root
 
 ---@type string|nil Git root of the watched project
 M._root = nil
@@ -112,9 +114,17 @@ end
 ---@param root? string Project root (auto-detected from git or cwd)
 function M.start(root)
   root = root or config.options.watch_dir or diff_engine.git_root() or vim.fn.getcwd()
-  if M._root and M._root ~= root then
+  root = vim.uv.fs_realpath(root) or root
+  if history_root and history_root ~= root then
     follow.clear()
+    timeline.clear()
+    inline.clear()
+    panel.setup(config.options.timeline)
+    if panel.is_open() then
+      panel.render()
+    end
   end
+  history_root = root
   M._root = root
 
   watcher.start(root, on_file_change)
@@ -131,6 +141,7 @@ end
 
 --- Stop watching.
 function M.stop()
+  generation = generation + 1
   live.stop()
   watcher.stop()
   read_events.stop()
@@ -322,6 +333,11 @@ end
 --- Setup the plugin.
 ---@param opts? AgentLensOpts
 function M.setup(opts)
+  generation = generation + 1
+  watcher.stop()
+  read_events.stop()
+  M._root = nil
+  status.close()
   live.stop()
   status.reset()
   config.setup(opts)
@@ -436,7 +452,11 @@ function M.setup(opts)
   -- Auto-start if enabled
   if config.options.enabled then
     -- Defer start slightly to let Neovim finish initializing
+    local epoch = generation
     vim.defer_fn(function()
+      if epoch ~= generation then
+        return
+      end
       -- Only start if we're in a git repo
       if diff_engine.git_root() then
         M.start()

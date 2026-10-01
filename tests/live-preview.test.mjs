@@ -168,6 +168,22 @@ try {
   socket.end();
   await waitFor((current) => !current.drafts.length);
 
+  stream("paused-success", "write", { path: "paused.lua", content: "FROZEN SNAPSHOT\n" });
+  await waitFor((current) => matches(current, ["FROZEN SNAPSHOT"]));
+  await query("pause");
+  stream("paused-success", "write", { path: "paused.lua", content: "LATEST SAVED\n" }, true);
+  toolCall("paused-success", "write", { path: "paused.lua", content: "LATEST SAVED\n" });
+  writeFileSync(join(root,"paused.lua"),"LATEST SAVED\n");
+  result("paused-success", "write", { path: "paused.lua" });
+  emit("turn_end", {});
+  await pause(200);
+  state=await query();
+  assert.equal(state.control,"paused");
+  assert(matches(state,["FROZEN SNAPSHOT"]),"successful completion/closure while paused keeps visible snapshot frozen");
+  await query("resume");
+  await waitFor((current) => !current.drafts.length && current.control==="following");
+  assert.equal((await query()).status.activity.phase,"settled");
+
   stream("oversized", "write", { path: "oversized.lua", content: "x".repeat(1024 * 1024 + 1) });
   stream("too-many-lines", "edit", { input: "[edit.lua#A1B2]\nPUT 2.=2:\n" + "+x\n".repeat(20001) });
   await pause(100);

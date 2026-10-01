@@ -12,6 +12,7 @@ local function git(...)
 end
 local ok, err = xpcall(function()
   git("init")
+  assert(diff.git_root(root) == root, "repository discovery returns one canonical path")
   git("config", "user.email", "test@test")
   git("config", "user.name", "Test")
   local no_head, message = diff.review(root, "missing.lua")

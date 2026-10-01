@@ -1,267 +1,297 @@
-*agent-lens.txt*  Watch AI agent edits in real-time inside Neovim
+*agent-lens.txt*  Watch, interrupt and review agent work in Neovim
 
 ==============================================================================
-CONTENTS                                              *agent-lens-contents*
+CONTENTS                                                  *agent-lens*
 
-  1. Introduction ........................ |agent-lens-intro|
-  2. Requirements ........................ |agent-lens-requirements|
-  3. Installation ........................ |agent-lens-installation|
-  4. Commands ............................ |agent-lens-commands|
-  5. Keymaps ............................. |agent-lens-keymaps|
-  6. API ................................. |agent-lens-api|
+  1. Setup             |agent-lens-setup|
+  2. Follow            |agent-lens-follow|
+  3. Timeline          |agent-lens-timeline|
+  4. Review            |agent-lens-review|
+  5. Status            |agent-lens-status|
+  6. Commands          |agent-lens-commands|
+  7. Configuration     |agent-lens-config|
+  8. Lua API           |agent-lens-api|
+  9. Bridge/privacy    |agent-lens-bridge|
 
-==============================================================================
-1. INTRODUCTION                                          *agent-lens-intro*
-
-agent-lens.nvim watches projects for file changes, highlights activity in file
-buffers, and shows an interactive timeline with native Neovim diffs. With the
-optional Pi/OMP bridge it can also follow the agent's current read, edit, or
-write location across files.
-
-Filesystem watching is agent-agnostic. Follow Agent uses correlated,
-metadata-only Pi/OMP tool events because exact locations cannot be inferred
-from filesystem notifications.
+Requires Neovim >= 0.10, Git and a Git repository. No runtime dependencies.
+Filesystem writes from any process are tracked; they are not agent attribution.
 
 ==============================================================================
-2. REQUIREMENTS                                   *agent-lens-requirements*
+1. SETUP                                                *agent-lens-setup*
 
-- Neovim >= 0.10
-- git
-- A project under git version control
-
-==============================================================================
-3. INSTALLATION                                   *agent-lens-installation*
-
-With lazy.nvim (GitHub): >lua
-  {
-    "fulstaph/agent-lens.nvim",
-    event = "VeryLazy",
-    opts = { agent_name = "pi" },
-    config = function(_, opts)
-      require("agent-lens").setup(opts)
-    end,
-  }
-<
-Local development: >lua
-  {
-    dir = "~/agent-lens.nvim",
-    event = "VeryLazy",
-    opts = { agent_name = "pi" },
-    config = function(_, opts)
-      require("agent-lens").setup(opts)
-    end,
-  }
-<
-
-==============================================================================
-4. COMMANDS                                           *agent-lens-commands*
-
-:AgentLens                                                    *:AgentLens*
-  Toggle the timeline panel. Starts the watcher if not running.
-
-:AgentLensStart [dir]                                    *:AgentLensStart*
-  Start the file watcher. Optionally specify a directory.
-
-:AgentLensStop                                            *:AgentLensStop*
-  Stop the file watcher.
-
-:AgentLensClear                                          *:AgentLensClear*
-  Clear the timeline, in-buffer activity, and active follow marker.
-
-:AgentLensInlineToggle                            *:AgentLensInlineToggle*
-  Hide or show read/write marks in ordinary file buffers.
-
-:AgentLensFollow                                        *:AgentLensFollow*
-  Toggle live navigation to the active Pi/OMP tool location. Follow is
-  opt-in and requires the bundled extension.
-
-:AgentLensDiff                                            *:AgentLensDiff*
-  Open a diff for an edit, or the current file at the requested start line
-  for a read event with a known range.
-
-:AgentLensClose                                          *:AgentLensClose*
-  Close all agent-lens windows (timeline + diff).
-
-==============================================================================
-5. KEYMAPS                                             *agent-lens-keymaps*
-
-Global ~
-  <leader>al    Toggle timeline panel
-  <leader>af    Toggle Follow Agent
-  ]a            Next edit in timeline
-  [a            Previous edit in timeline
-
-Timeline buffer ~
-  <CR>          Diff edit, or open file for read event
-  q             Close timeline
-  R             Refresh
-
-==============================================================================
-6. API                                                     *agent-lens-api*
-
+Add fulstaph/agent-lens.nvim to your plugin manager and configure:
 >lua
-  local lens = require("agent-lens")
-  lens.setup(opts)       -- Configure and start
-  lens.toggle()          -- Toggle timeline panel
-  lens.toggle_follow()   -- Toggle Follow Agent
-  lens.start(root)       -- Start watcher
-  lens.stop()            -- Stop watcher
-  lens.show_diff()       -- Diff for selected entry
-  lens.close_all()       -- Close all windows
-  lens.clear()           -- Clear timeline
+  require('agent-lens').setup({
+    agent_name = 'pi',
+    reads = { enabled = true },
+    follow = { enabled = true },
+  })
+<
+Automatic watching defaults to enabled; reads and Follow default to disabled.
+Install the optional dual-host bridge, then restart the Pi/OMP session:
+>sh
+  omp install github:fulstaph/agent-lens.nvim
+  pi install git:github.com/fulstaph/agent-lens.nvim
+<
+For local development use `omp install .` or `pi install .` in the checkout.
+One-session fallback:
+>sh
+  omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
+  pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
 <
 
-Optional Pi/OMP metadata ~
-  Reads and exact tool locations cannot be detected by filesystem
-  notifications. To show successful reads, follow the agent, or both:
+==============================================================================
+2. FOLLOW                                              *agent-lens-follow*
 
-  1. Set `reads = { enabled = true }`, `follow = { enabled = true }`, or both
-     in setup opts. Both default to false; metadata polling defaults to 100 ms.
-  2. Install the dependency-free dual-host bridge package, then restart the
-     Pi or OMP session:
-       omp install github:fulstaph/agent-lens.nvim
-       pi install git:github.com/fulstaph/agent-lens.nvim
-     For local development use `omp install .` or `pi install .`.
-  3. The one-session fallback remains:
-       pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
-       omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
+Control is off/following/paused, separately from latest activity. Follow uses
+one safe ordinary window in the current tab and never replaces unsaved text.
+Pinned, cursor/scroll-bound, diff, preview and special windows are protected.
+When necessary it chooses another safe window or opens a non-entered split.
 
-  The package maps both `omp.extensions` and `pi.extensions` to the same
-  `extensions/pi-read-events.js` entry. Run `npm run test:extension` to verify
-  the manifest and bridge contract.
+Generated code appears in an unmodified read-only draft; changed text reveals
+with a caret and active-line highlight. Unchanged context stays still. Viewport
+movement eases near its edge. Batches catch up within 180 ms; reduced motion is
+`follow.animation=false`. Duration clamps to 0-400 ms; large blocks skip reveal.
 
-  The extension appends repository-relative, metadata-only lifecycle records
-  to the Git directory at agent-lens/reads.jsonl. It never records contents,
-  patches, prompts, raw deltas, tool output, absolute paths, or secrets. The
-  producer and Neovim consumer both reject unsafe paths, `.git`, and symlinks.
+Manual navigation pauses before queued updates can move the editor. Leaving
+the followed window/tab pauses current mode. Insert hands the draft back to
+its real source, clamps row/column, preserves unsaved source text, and lets
+normal input continue without replaying a key. If source loading fails, keep
+the draft read-only, stay paused and retry with :AgentLensResume.
 
-Follow Agent ~
-  Follow Agent uses the current ordinary editor window and moves its cursor to
-  the active read/edit/write line. If that would replace unsaved work in another
-  file, or the current window is pinned, cursor/scroll-bound, diff, preview, or
-  otherwise special, it reuses a safe window in the current tab or opens a
-  non-entered split. Toggle Follow off to navigate independently.
+Pause keeps transports running, freezes visible draft/view, and stores one
+bounded latest pending snapshot. Resume consumes current state, not a backlog.
+Success while paused resumes to the real source. Error/cancellation discards
+speculative content; settled calls ignore late snapshots. Clear resets pending
+activity and returns enabled Follow to following/waiting. Stop disables it.
+Closing review never resumes automatically. Ordinary key-navigation pauses
+can be disabled with `follow.auto_pause=false`; modal/Insert protections remain.
 
-  Live code appears in a temporary read-only `agent-lens://draft/...` buffer.
-  The cursor and marker follow generated lines, including partially typed
-  lines. The labels
-  are `AGENT · pi · drafting`, `AGENT · pi · applying`, and settled `AGENT · pi`.
-  Follow does not switch window focus, force-replace modified buffers, create
-  timeline entries, or clear static activity marks.
-
-  Live drafts use a private local Unix socket on macOS and Linux. Contents
-  stay in memory and are never written to the metadata log, source files, or
-  swap files. Draft updates are coalesced every 25 ms and limited to 1 MiB and
-  20,000 lines. Supported inputs are full-file writes, Pi oldText/newText
-  replacements, numeric OMP hashline replacements/insertions, and patch
-  additions or updates with unique context. Other edits follow locations.
-  Set `follow = { enabled = true, preview = false }` for location-only mode.
-  Each Neovim instance has a separate socket, removed on stop or exit.
-
-  Changed text reveals progressively with a generated-column caret and an
-  active-line highlight. Untouched context stays in place; the viewport eases
-  when the caret approaches its edge. Batches catch up within 180 ms, including
-  a final batch received just before success. Set `follow.animation = false`
-  for immediate updates, or adjust `follow.animation_ms` (0-400 ms). Large
-  changes skip the reveal to stay responsive.
-
-  The draft stays visible while execution applies the edit. Success replaces
-  it with the real source buffer; failure, cancellation, or disabling Follow
-  removes it. Unsaved source buffers are preserved.
-
-  Progress records are edit-only, carry a positive monotonic `sequence`, and
-  are validated again by Neovim. `start` reconciles the speculative target and
-  `tool_result` remains authoritative. Some providers emit one complete delta;
-  received text can be revealed visually, but cannot appear before it arrives.
-  Unmodified targets refresh from
-  disk through normal Neovim file-reading hooks, including unmodified drafts
-  whose files have just been created. A modified draft is kept and reported
-  rather than passed to Neovim's file-created prompt. Failed loads are reported
-  and can be retried; they do not display a successful marker on an empty
-  buffer. Streamed code never modifies source buffers. Late completions and
-  draft snapshots from settled calls are ignored.
+Window modes ~
+  current (default): uses the current-tab safe editor selection.
+  split: owns one agent window, right by default, without changing input focus.
+  Editing unrelated windows continues normally. Interacting with the agent
+  window pauses. Closing/reusing it pauses; only explicit resume/mode actions
+  recreate it. Inactive tabs freeze; still-following splits catch up on return.
+  Teardown never closes a user-repurposed window. If its winbar is customized,
+  Agent Lens stops replacing that winbar.
 
 In-buffer activity ~
-  Enabled by default (`inline = { enabled = true }`). Writes highlight the
-  current Git HEAD-to-disk changed lines, not an attribution to the agent.
-  Pure deletions get a nearby virtual-text label. Known read-tool ranges
-  highlight those requested lines; unknown ranges show a file-level label.
-  Buffer-local unsaved changes temporarily hide marks. Use
-  :AgentLensInlineToggle to hide/show them or :AgentLensClear to remove them.
+  `inline.enabled=true` highlights current HEAD-to-disk write lines and latest
+  successful read ranges. Pure deletions get a nearby label. Unknown reads get
+  a file-level label. Marks hide during unsaved local edits. Follow marks are
+  separate; use :AgentLensInlineToggle or :AgentLensClear for static marks.
+
+==============================================================================
+3. TIMELINE                                          *agent-lens-timeline*
+
+Default files view groups retained events by path; events view is a flat feed.
+Groups order by latest matching activity and expand to individual read/edit
+children. Reads retain their reported range. Incoming activity preserves the
+selected event ID/file path and screen position. Trimmed selections choose a
+nearby surviving row. Paths truncate using actual display width and UTF-8.
+
+Opening successfully acknowledges the selected event, or all group events
+matching the filter. Scrolling/rendering does not. Mark-all-seen acknowledges
+the retained feed. Trimming/clear remove obsolete acknowledgement state.
++N/-M totals use the latest retained edit per file, even after a read: these
+are retained HEAD-to-disk comparisons, not summed snapshots or agent totals.
+
+Timeline keys ~                                          *agent-lens-keymaps*
+  j/k, ]a/[a    Move selection
+  Tab           Expand/collapse file group
+  CR            Open child; group prefers latest matching edit, else read
+  p             Preview edit hunk; read opens its reported range
+  f             Cycle all/reads/edits filters
+  u             Show only new groups/events
+  m             Mark all retained activity seen
+  g             Toggle files/events view
+  R             Refresh
+  q/Esc         Close
+
+Global keys default to <leader>al (timeline), <leader>af (toggle Follow) and
+<leader>ar (resume). Empty strings disable global bindings. ]a/[a are local to
+the timeline, not global. Runtime filter/view toggles do not rewrite setup opts.
+
+==============================================================================
+4. REVIEW                                              *agent-lens-review*
+
+Review recomputes current HEAD -> disk from the watched repository, including
+when cwd differs. Selected old events do not promise historical patches.
+Partial line removal is modified; missing tracked files are deleted; untracked
+files are added. Renames use separate old/new paths. Unsafe/symlink paths are
+rejected; binary/unchanged comparisons report a message. Repositories without
+HEAD need a first commit before review; linked worktrees use their own HEAD.
+
+Hunk preview ~
+  :AgentLensPreview or timeline p opens a bounded read-only unified float.
+  Without a selected timeline row, it uses the current watched file. Narrow
+  layouts wrap and scroll. ]h/[h navigates hunks; R recomputes and clamps the
+  current hunk; CR opens the full comparison; q/Esc restores the valid origin.
+
+Full comparison ~
+  :AgentLensDiff opens/reuses a separate native diff tab using diff_layout.
+  ]h/[h navigates hunks; ]f/[f enumerates current safe tracked/untracked/deleted
+  paths in deterministic order. Binary files are skipped with a message.
+  R refreshes; q/Esc closes owned windows and returns to the origin. Navigation
+  clamps at ends. Streaming writes never change the user's chosen file/hunk.
+
+Origin restoration is conditional on the same buffer still being displayed.
+Original splits, views and unsaved text survive. Changing the watched root clears
+retained activity so old paths cannot be compared against a different HEAD. Added/repurposed review windows
+remain; modified/reused buffers are never force-deleted. Manual window closure
+cleans orphan scratch buffers. The last editor window is never closed.
+Current-mode Follow pauses for review. Split Follow may continue in its owning
+tab and caches latest activity while that tab is inactive. Close never resumes.
+
+==============================================================================
+5. STATUS                                              *agent-lens-status*
+
+:AgentLensStatus shows root, watcher, Follow control/reason, latest validated
+activity and channel facts. Reading/Drafting/Applying/Settled/Failed describe
+observed lifecycle; Waiting does not imply thinking. Paused takes precedence.
+Metadata states: disabled/waiting/received/error. Preview states:
+disabled/listening/receiving/error. Missing logs/no peers are normal waiting.
+Only valid data advances receipt time (Unix seconds). A socket or an old log
+cannot prove the host is installed/alive. Restart/recovery clears errors.
+
+lens.status() returns a copied StatusSnapshot without contents:
+  watcher  {state, root?}
+  follow   {control, window, reason?}
+  activity {phase, tool?, path?, line?, call_id?}
+  metadata {state, last_valid_at?, error?}
+  preview  {state, peers?, last_valid_at?, error?}
+
+User AgentLensStatusChanged coalesces discrete changes; no frame polling/spam.
+User statuslines/winbars are preserved. Optional statusline integration:
+>lua
+  vim.o.statusline = "%{%v:lua.require'agent-lens'.statusline()%}"
+<
+The reevaluated expression renders escaped percent signs in filenames correctly.
+Use :checkhealth agent-lens for dependencies/observable facts, :AgentLensResume
+for paused control, and :AgentLensStart to restart transports after errors.
+
+==============================================================================
+6. COMMANDS                                          *agent-lens-commands*
+
+:AgentLens                                                  *:AgentLens*
+  Toggle timeline; starts watching if necessary.
+:AgentLensStart [dir]                                       *:AgentLensStart*
+  Start/restart watching and requested transports.
+:AgentLensStop                                             *:AgentLensStop*
+  Stop watcher/transports; disable Follow and release its owned UI.
+:AgentLensClear                                            *:AgentLensClear*
+  Clear retained events/acknowledgement, marks, selection and pending drafts.
+:AgentLensFollow                                           *:AgentLensFollow*
+  Toggle Follow enabled/off.
+:AgentLensPause                                            *:AgentLensPause*
+  Pause while retaining incoming activity.
+:AgentLensResume                                           *:AgentLensResume*
+  Enable/resume at latest safe target; starts needed sources.
+:AgentLensFollowMode [current|split]                        *:AgentLensFollowMode*
+  Choose mode; no argument toggles without changing control state.
+:AgentLensFilter [all|reads|edits]                           *:AgentLensFilter*
+  Choose in-session filter; no argument cycles.
+:AgentLensStatus                                           *:AgentLensStatus*
+  Open read-only details float; q/Esc closes.
+:AgentLensPreview                                          *:AgentLensPreview*
+  Preview selected/current hunk, or safely open a read range.
+:AgentLensDiff                                             *:AgentLensDiff*
+  Open selected/current full comparison, or safely open a read range.
+:AgentLensInlineToggle                                     *:AgentLensInlineToggle*
+  Toggle persistent source-buffer activity marks.
+:AgentLensClose                                            *:AgentLensClose*
+  Close timeline, review and status-details windows.
+
+==============================================================================
+7. CONFIGURATION                                      *agent-lens-config*
+
+Defaults (partial nested opts merge with these):
+>lua
+  require('agent-lens').setup({
+    enabled = true, watch_dir = nil, diff_source = 'git',
+    debounce_ms = 150, max_timeline_entries = 200,
+    timeline_position = 'right', timeline_width = 42, timeline_height = 15,
+    timeline = { view = 'files', filter = 'all' },
+    diff_layout = 'vertical', auto_open_diff = false, agent_name = 'agent',
+    reads = { enabled = false, interval_ms = 100 },
+    inline = { enabled = true },
+    follow = {
+      enabled = false, preview = true, animation = true, animation_ms = 180,
+      auto_pause = true, window = 'current',
+      split = { position = 'right', width = 0 },
+    },
+    keymaps = {
+      toggle = '<leader>al', follow = '<leader>af', resume = '<leader>ar',
+      next_edit = ']a', prev_edit = '[a', open_diff = '<CR>',
+      close = 'q', refresh = 'R',
+    },
+    highlights = {
+      added = 'DiffAdd', removed = 'DiffDelete', changed = 'DiffChange',
+      header = 'Title', timeline_file = 'Directory', timeline_time = 'Comment',
+      timeline_agent = 'Keyword', timeline_selected = 'CursorLine',
+      follow = 'CursorLine', follow_label = 'DiagnosticInfo',
+      follow_cursor = 'DiagnosticInfo',
+    },
+    filter = {
+      ignore_patterns = {
+        '*.swp', '*.swo', '*~', '*.pyc', '__pycache__/**', '.git/**',
+        'node_modules/**', '.DS_Store', '*.lock', 'lazy-lock.json',
+      },
+      min_change_bytes = 1,
+    },
+  })
+<
+Panel position: right/left/bottom. Diff layout: vertical/horizontal. Follow
+mode: current/split. Split position: right/left; width 0 means half width,
+positive integer widths clamp. Timeline view: files/events; filter:
+all/reads/edits. Animation duration: 0-400 ms. Theme-linked groups need no icons
+or patched font; status/text labels remain readable without color.
+
+==============================================================================
+8. LUA API                                               *agent-lens-api*
+>lua
+  local lens = require('agent-lens')
+  lens.setup(opts)
+  lens.start(root)
+  lens.stop()
+  lens.toggle()
+  lens.toggle_follow()          -- boolean enabled (paused is enabled)
+  lens.pause_follow()           -- boolean
+  lens.resume_follow()          -- boolean; enables and starts needed sources
+  lens.set_follow_window(mode)  -- boolean
+  lens.preview()                -- boolean success
+  lens.show_diff()              -- boolean success
+  lens.status()                 -- copied StatusSnapshot
+  lens.statusline()             -- escaped compact text
+  lens.clear()
+  lens.close_all()
+<
+
+==============================================================================
+9. BRIDGE AND PRIVACY                                  *agent-lens-bridge*
+
+extensions/pi-read-events.js produces complete metadata-only JSONL in the
+active Git directory's agent-lens/reads.jsonl (new files mode 0600). Contents,
+patches, prompts, raw deltas, output, absolute paths and secrets never enter it.
+Producer and consumer independently validate repository paths, .git exclusion,
+symlink components, lifecycle IDs/phases, ranges and edit-only progress sequence.
+Metadata polling starts at EOF; historical events are not replayed.
+
+extensions/live-preview.js separately sends code snapshots over private local
+Unix sockets (directory 0700/socket 0600, current uid) on macOS/Linux. No draft
+contents go to target files, swap, logs or public status. Limits: 1 MiB, 20,000
+lines, eight peers, bounded queues/tombstones and one newest pending snapshot.
+Snapshots coalesce every 25 ms. Supports full writes, Pi oldText/newText,
+numeric OMP hashline PUT/CUT/insert, and apply_patch add/update with unique
+context. Ambiguous/unsupported inputs fall back to metadata locations.
+Providers that deliver one complete delta can only reveal after receipt.
+
+Source buffers load through normal Neovim readers; modified buffers retain
+text. Failed loads report errors and can be retried. Successful completion
+uses real source; connection closure consumes already-written metadata first.
+Stopping/removing the host bridge stops production. Disable reads/Follow to
+stop consumption. The path-only JSONL history remains until deleted.
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:
-
-Observed status
----------------
-:AgentLensStatus shows watched root, Follow control/activity, and separate
-metadata/preview channels. Missing logs mean waiting; a socket with no peers
-means listening. Neither proves that an agent host is running. Validated data
-advances receipt time; :AgentLensStart retries errors.
-
-require("agent-lens").status() returns a copied metadata-only StatusSnapshot:
-watcher {state, root}, follow {control, window, reason}, activity
-{phase, tool, path, line, call_id}, metadata/preview {state, last_valid_at, error},
-plus preview peers. Draft bodies never appear here. Compact activity labels
-are Reading, Drafting, Applying, Settled, Failed, and Waiting; Paused takes
-precedence. Integrate optionally with
-%{v:lua.require('agent-lens').statusline()} (percent paths are escaped).
-User AgentLensStatusChanged fires once for coalesced observable changes.
-Status never replaces your statusline or winbar.
-
-Follow controls
----------------
-:AgentLensPause / lens.pause_follow() freezes the view while tracking continues.
-:AgentLensResume / lens.resume_follow() (default <leader>ar) displays the newest
-safe target. Follow remains enabled while paused. Navigation and leaving the
-followed window/tab pause; Insert hands drafts back to their source, preserving
-unsaved text and normal input. Set follow.auto_pause=false to disable ordinary
-key-navigation pauses; modal/Insert protections still apply. Clear returns
-enabled Follow to waiting. Stop disables Follow and closes its transports.
-
-Dedicated agent window
-----------------------
-:AgentLensFollowMode [current|split] toggles or chooses a window mode;
-lens.set_follow_window(mode) preserves paused/following control. Default
-follow.window="current"; split mode owns one window, keeps keyboard focus, and
-allows editing elsewhere. follow.split={position="right",width=0} uses half
-width; position can be left and positive widths clamp to the editor. Closing
-or reusing the split pauses; only resume/mode actions recreate it. Inactive
-tabs freeze and a still-following split catches up on return. Customizing its
-winbar stops Agent Lens from replacing that winbar.
-
-Grouped timeline
-----------------
-Default timeline={view="files",filter="all"}; view="events" keeps a flat feed.
-Tab expands files; g switches views; f / :AgentLensFilter [all|reads|edits]
-changes the filter; u shows new activity; m marks retained events seen. j/k
-and ]a/[a navigate; CR opens the latest edit in a group (otherwise its latest
-read range); p previews when available. Incoming activity preserves selection
-and screen position. Opening successfully acknowledges matching IDs; scrolling
-does not. +N/-M totals describe latest retained HEAD-to-disk comparisons per
-file, never summed snapshots or an agent-only repository total.
-
-Review comparisons
-------------------
-Reviews recompute current HEAD-to-disk text for the watched repository; an old
-event does not retain a historical patch. Partial line removal is modified;
-missing tracked files are deleted; untracked and newly added files are added.
-Renames appear as separate old/new paths. Binary, unsafe, unchanged and missing
-HEAD comparisons give a useful message. Create the first commit to establish
-a HEAD baseline. Paths are validated again and Git paths use literal, NUL
-delimited enumeration, including spaces, Unicode, percent and flag-like names.
-
-Hunk and full review
--------------------
-:AgentLensPreview / lens.preview() (timeline p) opens a bounded read-only unified
-hunk float: ]h/[h navigate, R refreshes current disk, CR opens full comparison,
-q/Esc closes. Without a selected timeline row, use the current watched file.
-:AgentLensDiff / lens.show_diff() opens HEAD → disk in a separate native diff
-tab, using diff_layout="vertical" or "horizontal". ]f/[f navigates current safe
-changed files; ]h/[h navigates hunks; R refreshes; q/Esc returns to the origin.
-Navigation clamps at ends and skips binary files with a message. Streaming
-writes never choose a review file/hunk for you. Reviews preserve original
-splits, views and unsaved text. Reused/user-added review windows survive close;
-only owned, unmodified scratch buffers are removed. Current Follow pauses for
-review; split Follow can continue in its owning tab. Closing never resumes.
-Read events open their recorded range in a safe source window.

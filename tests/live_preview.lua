@@ -40,6 +40,10 @@ input:read_start(function(err, chunk)
       if command.kind == "edit" then
         vim.cmd("edit " .. vim.fn.fnameescape(root .. "/user.lua"))
         vim.api.nvim_buf_set_lines(0, 0, -1, false, { "unsaved user text" })
+      elseif command.kind == "pause" then
+        follow.pause("test")
+      elseif command.kind == "resume" then
+        follow.resume()
       elseif command.kind == "toggle" then
         follow.toggle()
       elseif command.kind == "stop" then
@@ -80,6 +84,8 @@ input:read_start(function(err, chunk)
         modified = vim.bo[buf].modified,
         drafts = drafts,
         marks = marks,
+        control = follow.state().control,
+        status = require("agent-lens.status").get(),
         windows = #vim.api.nvim_tabpage_list_wins(0),
       })
     end)

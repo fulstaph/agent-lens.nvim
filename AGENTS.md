@@ -17,13 +17,13 @@ lua/agent-lens/
 ├── timeline.lua    — Ordered edit feed data model (add, list, clear, summary)
 ├── panel_model.lua — Pure grouping/filtering and stable row identities
 ├── panel.lua       — Timeline sidebar UI (split window, j/k nav, highlights)
-├── diff_view.lua   — Side-by-side edit diff viewer
+├── diff_view.lua   — Owned hunk float/review tab and origin restoration
 ├── read_events.lua — JSONL trust boundary for Pi/OMP reads and locations
 ├── inline.lua      — Persistent read-range/write-line extmarks
 ├── status.lua      — Copied observable metadata and details UI
 ├── paths.lua       — Shared repository-relative file validation
 ├── follow_view.lua — Source/draft lifecycle, input provenance and safe rendering
-├── follow.lua      — One live agent marker, safe window selection, viewport following
+├── follow.lua      — Control/activity, correlation, latest pending snapshot
 ├── live.lua        — Private local-socket receiver for transient code previews
 ├── motion.lua      — Bounded UTF-8 text reveal, caret, and viewport easing
 └── health.lua      — :checkhealth agent-lens
@@ -43,7 +43,7 @@ into independent timeline, inline, and follow projections.
 `extensions/live-preview.js` separately projects streamed write/edit arguments
 into bounded draft snapshots over private local Unix sockets. Code stays in
 memory, outside the JSONL log; `live.lua` independently validates snapshots
-before `follow.lua` displays a read-only scratch buffer. Tool results restore
+before the Follow controller/view display a read-only scratch buffer. Tool results restore
 the real source buffer. No source buffer, swap file, or disk file stores drafts.
 The bridge is installable as a dual-host package:
 `omp install github:fulstaph/agent-lens.nvim` or
@@ -67,11 +67,13 @@ Pi/OMP message_update/tool_call/result → metadata-only JSONL
   → read_events.poll() validates repository paths and lifecycle fields
   → successful read → timeline.add() + inline.record_read()
   → correlated location → follow.record_location()
-  → current safe editor window + cursor + one agent_lens_follow extmark
+  → follow control + status facts → follow_view safe window + marker
 
 Pi/OMP streamed edit/write arguments → transient local socket
   → live.lua validates path, sequence, size, and lines
-  → follow.record_preview() → motion.reveal() → read-only draft + generated-column caret
+  → follow.record_preview() stores one latest snapshot
+  → following: follow_view + motion.reveal() → draft/caret
+  → paused: frozen display; latest snapshot retained until resume
   → tool_result → real source buffer, or discard failed/cancelled draft
 ```
 
@@ -82,6 +84,57 @@ Pi/OMP streamed edit/write arguments → transient local socket
 - `FileDiff` — `{rel_path, status, hunks[], stats, raw}`
 - `DiffHunk` — `{old_start, old_count, new_start, new_count, header, lines[]}`
 - `AgentLocation` — `{call_id, phase, tool, path?, line?, agent, sequence?}` normalized by `read_events.lua`; `progress` is edit-only and sequence-bearing
+
+
+### UI contracts and ownership
+
+- Follow control is off/following/paused; enabled is true while paused. Control
+  and activity are separate copied facts. Incoming paused previews replace one
+  bounded newest snapshot, not a frame queue. Successful resume uses real source;
+  failure/cancellation discards draft contents. Clear retains enablement; stop
+  disables it. Recent settled-call tombstones survive toggles.
+- `vim.on_key` provenance pauses before queued frames; programmatic cursor moves
+  are not user input. Insert hands back source without replaying keys or replacing
+  unsaved text. Unsafe modes/window bindings always protect the editor.
+- follow_view owns draft lifecycle and the expected split window/buffer/tab.
+  Unrelated input keeps split mode following. Inactive tabs retain controller
+  state and catch up on return. Reused/user-modified windows survive teardown.
+- Timeline IDs are monotonic across clear. Ranges/stats are copied; acknowledgements
+  stay bounded by retained IDs. Header stats use latest retained edits per path.
+  `panel_model` row keys are file:path/event:id. Boolean action success acknowledges
+  only selected matching IDs; rendering/scrolling never acknowledges.
+- Review compares current HEAD -> disk from the watched root. Ownership ties unique
+  session buffers to windows. `ReviewOrigin {tab,win,buf,view}` restores views only
+  for unchanged buffers. Full reviews use a separate tab; never :only on user tabs
+  or delete modified/reused buffers. Current Follow pauses; split can continue.
+- Transport callbacks carry generations; old roots and stopped sources cannot
+  restore views/status. Socket closure consumes already-written metadata before
+  deciding cancellation. Missing logs/no peers are waiting, not host-liveness facts.
+  Status setters whitelist scalar metadata; public snapshots never expose contents.
+
+### Shared types and interfaces
+
+- `FollowTarget {root,call_id,phase,tool,path?,line?,agent?,sequence?}`.
+- `DraftSnapshot {toolCallId,tool,path,line,sequence,agent,lines}` validated by live.lua;
+  only views/transient controllers see lines (1 MiB / 20,000-line bound).
+- `FollowState {control,window,reason?}`; `ActivityState {phase,tool?,path?,line?,call_id?}`.
+- `ChannelState {state,peers?,last_valid_at?,error?}`, timestamps Unix seconds.
+- `StatusSnapshot {watcher,follow,activity,metadata,preview}` copied by status.get().
+- `PanelOptions {view,filter,unread_only,expanded}`; `PanelRow
+  {key,kind,path,entry,event_ids,depth,reads,edits,unread,stats?}`.
+- paths.resolve(root,path,allow_missing) rejects unsafe components and links;
+  follow.target_path remains its compatibility delegate.
+- status.set(section,value) replaces a whitelisted section; get/compact/statusline
+  expose observable facts; User AgentLensStatusChanged coalesces changes.
+- follow.pause/resume/state/stop/set_window; follow_view.setup/render/freeze/
+  handoff/current/clear keep controllers separate from view ownership.
+- timeline.acknowledge/mark_all_seen/unread_ids/latest_edit_for_path/summary;
+  panel.set_actions/set_filter/selected/selected_ids; panel_model.project/select.
+- diff.review(root,path) returns FileDiff or nil/error; changed_files returns
+  sorted safe NUL-delimited paths, including deletions/untracked files. Missing
+  HEAD is unavailable; binary reviews are rejected; renames use delete/add paths.
+- diff_view.preview/open/navigate_hunk/navigate_file/refresh return success;
+  close tears down only owned UI. Public lens.show_diff/preview return booleans.
 
 ## Development rules
 
@@ -106,7 +159,7 @@ nvim --headless -u NONE -c "set rtp+=." \
 # Verify all commands register
 nvim --headless -u NONE -c "set rtp+=." \
   -c "lua require('agent-lens').setup({ enabled = false })" \
-  -c "lua local cmds = vim.api.nvim_get_commands({}); for _, n in ipairs({'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensFollow','AgentLensInlineToggle','AgentLensStart','AgentLensStop'}) do assert(cmds[n], n) end; print('OK')" \
+  -c "lua local cmds = vim.api.nvim_get_commands({}); for _, n in ipairs({'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensFollow','AgentLensInlineToggle','AgentLensStart','AgentLensStop','AgentLensPause','AgentLensResume','AgentLensFollowMode','AgentLensStatus','AgentLensFilter','AgentLensPreview'}) do assert(cmds[n], n) end; print('OK')" \
   -c "qa!"
 ```
 
@@ -114,6 +167,7 @@ The metadata path, follow projection, in-buffer overlays, and installable
 bridge package have behavioral tests:
 
 ```bash
+nvim --headless -u NONE -l tests/ui_workflow.lua
 nvim --headless -u NONE -l tests/review.lua
 nvim --headless -u NONE -l tests/review_diff.lua
 nvim --headless -u NONE -l tests/timeline_panel.lua
@@ -128,7 +182,7 @@ nvim --headless -u NONE -l tests/motion.lua
 nvim --headless -u NONE -l tests/watcher.lua
 nvim --headless -u NONE -l tests/inline.lua
 npm run test:extension
-npm run test:live
+npm run test:live # Real socket lifecycle plus embedded RPC input/Insert checks
 npm pack --dry-run --json
 ```
 
@@ -164,23 +218,3 @@ the source and keep the Neovim consumer's independent validation in place.
 ```
 
 Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `perf`
-
-Follow control is off/following/paused. Paused tracking holds one bounded latest
-snapshot, freezes motion and restores authoritative source on settled resume.
-Input uses vim.on_key provenance; cursor autocmds alone never imply user input.
-
-Follow split ownership is window/buffer/tab-specific; teardown preserves any
-user-repurposed window. Inactive tabs retain current controller state only.
-
-Timeline IDs remain monotonic across clear. Ranges are copied; unread IDs and
-acknowledgements are bounded by retained entries. Panel rows identify file:path
-or event:id; action callbacks acknowledge only on a true return value.
-
-`diff.review(root,path)` returns FileDiff or nil/error for a current safe
-comparison. `changed_files(root)` sorts/deduplicates literal NUL-delimited Git
-paths, including deleted/untracked targets. Missing HEAD is unavailable.
-
-Review ownership ties each unique session buffer to its expected window.
-Origin {tab,win,buf,view} restores a view only if the same source remains.
-Full reviews use a separate tab; never :only on user tabs or delete modified
-/reused buffers. Public show_diff/preview return boolean success for panel ack.

@@ -28,11 +28,21 @@ local ok, err = xpcall(function()
   preview(1)
   local agent = view.current().win
   assert(agent ~= win and vim.api.nvim_get_current_win() == win, "split_keeps_focus")
+  local insert_checked = false
+  vim.api.nvim_create_autocmd("InsertEnter", {
+    once = true,
+    callback = function()
+      preview(2)
+      assert(follow.state().control == "following", "split continues while typing elsewhere")
+      insert_checked = true
+    end,
+  })
   vim.api.nvim_feedkeys(
     "iX" .. vim.api.nvim_replace_termcodes("<Esc>", true, false, true),
     "xt",
     false
   )
+  assert(insert_checked, "actual Insert state checked")
   assert(follow.state().control == "following", "unrelated_edit_does_not_pause")
   vim.api.nvim_set_current_win(agent)
   vim.api.nvim_feedkeys("k", "xt", false)
@@ -42,7 +52,7 @@ local ok, err = xpcall(function()
   local tab = vim.api.nvim_get_current_tabpage()
   local before = vim.api.nvim_buf_get_lines(view.current().buf, 0, -1, false)
   vim.cmd("tabnew")
-  preview(2)
+  preview(3)
   assert(follow.state().control == "following")
   assert(
     vim.deep_equal(
@@ -53,11 +63,11 @@ local ok, err = xpcall(function()
   )
   vim.api.nvim_set_current_tabpage(tab)
   assert(
-    vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(agent), 0, -1, false)[2] == "draft 2",
+    vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(agent), 0, -1, false)[2] == "draft 3",
     "inactive_tab_catches_up"
   )
   vim.api.nvim_win_close(agent, true)
-  preview(3)
+  preview(4)
   assert(
     follow.state().control == "paused" and #vim.api.nvim_tabpage_list_wins(tab) == 1,
     "closed split not recreated"

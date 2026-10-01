@@ -22,7 +22,7 @@ local function owned_bar()
     and vim.api.nvim_win_get_buf(owned.win) == owned.buf
   then
     if owned.bar == nil or vim.wo[owned.win].winbar == owned.bar then
-      owned.bar = require("agent-lens.status").statusline()
+      owned.bar = status.statusline()
       vim.wo[owned.win].winbar = owned.bar
     end
   end
@@ -466,7 +466,11 @@ function M.render(next_target, event)
     return false
   end
   local mode = vim.fn.mode(1)
-  if vim.fn.getcmdwintype() ~= "" or mode:match("^[icRr]") then
+  local unrelated_insert = window_mode == "split"
+    and owned
+    and owned.win ~= vim.api.nvim_get_current_win()
+    and mode:match("^[iR]")
+  if vim.fn.getcmdwintype() ~= "" or (mode:match("^[icRr]") and not unrelated_insert) then
     on_input("unsafe editor mode", false)
     return false
   end

@@ -20,6 +20,28 @@ local pending
 local active_call_id
 local finished = {}
 local order = {}
+local notice_generation = 0
+local function notify_control(state)
+  notice_generation = notice_generation + 1
+  local epoch = notice_generation
+  vim.schedule(function()
+    if
+      epoch == notice_generation
+      and control == state
+      and not require("agent-lens.panel").is_open()
+    then
+      vim.notify(
+        "[agent-lens] Follow "
+          .. (
+            state == "paused"
+              and "Paused · " .. (reason or "manual") .. " · :AgentLensResume to continue"
+            or "resumed"
+          ),
+        vim.log.levels.INFO
+      )
+    end
+  end)
+end
 local phases = { progress = "drafting", start = "applying", success = "settled", error = "failed" }
 local function publish()
   status.set("follow", { control = control, window = window, reason = reason })
@@ -91,15 +113,20 @@ function M.pause(why)
   if control == "off" then
     return false
   end
+  local changed = control ~= "paused"
   control = "paused"
   reason = why or "manual"
   view.freeze()
   publish()
+  if changed then
+    notify_control("paused")
+  end
   return true
 end
 --- Resume the newest validated target; a failed handoff stays paused.
 ---@return boolean
 function M.resume()
+  local changed = control ~= "following"
   control = "following"
   reason = nil
   if target and target.path and not render() then
@@ -110,6 +137,9 @@ function M.resume()
     return false
   end
   publish()
+  if changed then
+    notify_control("following")
+  end
   return true
 end
 --- Change current/split mode without changing control state.
@@ -236,7 +266,11 @@ end
 ---@param root string
 ---@param path string
 function M.file_changed(root, path)
-  if target and target.root == root and target.path == path then
+  if
+    target
+    and (vim.uv.fs_realpath(target.root) or target.root) == (vim.uv.fs_realpath(root) or root)
+    and target.path == path
+  then
     render()
   end
 end
@@ -256,6 +290,7 @@ function M.is_enabled()
 end
 --- Reset pending activity while retaining enablement.
 function M.clear()
+  notice_generation = notice_generation + 1
   view.clear()
   target = nil
   pending = nil

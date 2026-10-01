@@ -141,6 +141,24 @@ local ok, err = xpcall(function()
   vim.wait(40, function()
     return vim.fn.getcmdwintype() == ""
   end)
+  setup()
+  local notify = vim.notify
+  local notices = {}
+  vim.notify = function(message)
+    notices[#notices + 1] = message
+  end
+  follow.record_preview(root, event(1, "notice"))
+  follow.pause("manual")
+  follow.pause("manual")
+  for i = 2, 10 do
+    follow.record_preview(root, event(i, "latest"))
+  end
+  vim.wait(20)
+  assert(#notices == 1, "pause is visible once with panel closed, without frame spam")
+  follow.resume()
+  vim.wait(20)
+  assert(#notices == 2, "resume is visible once")
+  vim.notify = notify
   print("follow controls behavior OK")
 end, debug.traceback)
 follow.clear()

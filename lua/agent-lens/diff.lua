@@ -30,7 +30,8 @@ function M.git_root(path)
   if result.code ~= 0 then
     return nil
   end
-  return vim.uv.fs_realpath(result.stdout:gsub("\n$", ""))
+  local directory = result.stdout:gsub("\n$", "")
+  return vim.uv.fs_realpath(directory)
 end
 --- Check index tracking without interpreting a path as flags or a pattern.
 ---@param root string
