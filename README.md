@@ -218,7 +218,6 @@ All options with their defaults:
 require("agent-lens").setup({
   enabled = true,                -- Auto-start watching on setup
   watch_dir = nil,               -- nil = auto-detect git root or cwd
-  diff_source = "git",           -- How to compute diffs
   debounce_ms = 150,             -- Debounce file change events (ms)
   max_timeline_entries = 200,    -- Max entries in the timeline
   timeline_position = "right",   -- "right", "left", or "bottom"
@@ -276,8 +275,7 @@ require("agent-lens").setup({
       "__pycache__/**", ".git/**",
       "node_modules/**", ".DS_Store",
       "*.lock", "lazy-lock.json",
-    },
-    min_change_bytes = 1,
+    },                           -- Git ignore rules (.gitignore etc.) also apply
   },
 })
 ```
@@ -307,8 +305,8 @@ lens.close_all()            -- timeline, review and details windows
 1. On `setup()`, a libuv `fs_event` watcher attaches to the git root directory.
    - macOS: single recursive watcher via native FSEvents.
    - Linux: per-directory `inotify` watchers, recursively attached.
-2. File change events are debounced (default 150ms) and filtered against ignore patterns.
-3. Each surviving event triggers `git diff HEAD -- <file>` to compute a structured diff with hunk parsing.
+2. File change events are debounced (default 150ms) and filtered against ignore patterns and Git ignore rules. Linux skips watching Git-ignored directories.
+3. Each surviving event triggers `git diff HEAD -- <file>` to compute a structured diff with hunk parsing. Git runs asynchronously, one file at a time in arrival order, so the editor never waits on it.
 4. The diff is stored as a timestamped timeline entry with add/remove stats.
 5. The timeline projects retained events into stable file groups (or a flat feed).
 6. Preview shows a current unified hunk; full review opens owned HEAD/disk scratch buffers in a separate native diff tab.
@@ -384,7 +382,8 @@ be revealed visually; code cannot appear before the host sends it.
 
 The extension writes **only repository-relative paths, bounded lifecycle IDs,
 tool names, phases, and optional line/sequence/range metadata** to
-`<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`). It never records
+`<git-dir>/agent-lens/reads.jsonl` (new files use mode `0600`; truncated past
+4 MiB, since Neovim only reads new records). It never records
 file contents, write text, patches, prompts, raw deltas, tool output, absolute
 paths, or secrets. The package uses the same bridge through both
 `omp.extensions` and `pi.extensions`; run `npm run test:extension` to verify

@@ -244,10 +244,26 @@ export function createLivePreview(resolveFile) {
     };
     const record = `${JSON.stringify(event)}\n`;
     if (Buffer.byteLength(record) > MAX_BYTES) return;
+    let lagging = false;
     for (const socket of peers.values()) {
-      if (!socket.destroyed && socket.writableLength < MAX_BYTES) socket.write(record);
-      else socket.destroy();
+      if (socket.destroyed) continue;
+      // A slow editor skips intermediate snapshots; closing would read as cancellation.
+      if (socket.writableLength >= MAX_BYTES) lagging = true;
+      else socket.write(record);
     }
+    if (lagging) {
+      call.dirty = true;
+      schedule();
+    }
+  }
+
+  function schedule() {
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      for (const pending of calls.values()) flush(pending);
+    }, 25);
+    timer.unref();
   }
 
   return {
@@ -257,13 +273,7 @@ export function createLivePreview(resolveFile) {
       call.toolCall = toolCall;
       call.dirty = true;
       calls.set(toolCall.toolCallId, call);
-      if (!timer) {
-        timer = setTimeout(() => {
-          timer = undefined;
-          for (const pending of calls.values()) flush(pending);
-        }, 25);
-        timer.unref();
-      }
+      schedule();
     },
     finish(toolCallId) {
       const call = calls.get(toolCallId);

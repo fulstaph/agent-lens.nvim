@@ -88,7 +88,7 @@ local function close_peer(peer, drain)
   end
   local function finish_close()
     if peers[peer] == state then
-      if state.queued > 0 then
+      if state.scheduled then
         vim.schedule(finish_close)
         return
       end
@@ -159,7 +159,7 @@ function M.start(root)
       peer:close()
       return
     end
-    local state = { root = root, generation = epoch, pending = "", queued = 0 }
+    local state = { root = root, generation = epoch, pending = "", scheduled = false }
     peers[peer] = state
     peer:read_start(function(read_err, chunk)
       if read_err or not chunk then
@@ -167,25 +167,30 @@ function M.start(root)
         return
       end
       state.pending = state.pending .. chunk
+      -- Snapshots are complete states: a slow editor decodes only the newest one.
+      local start, first, last = 1, nil, nil
+      while true do
+        local boundary = state.pending:find("\n", start, true)
+        if not boundary then
+          break
+        end
+        first, last, start = start, boundary - 1, boundary + 1
+      end
+      if first then
+        state.latest = state.pending:sub(first, last)
+        state.pending = state.pending:sub(start)
+      end
       if #state.pending > MAX_BYTES then
         close_peer(peer)
         return
       end
-      while true do
-        local boundary = state.pending:find("\n", 1, true)
-        if not boundary then
-          break
-        end
-        local record = state.pending:sub(1, boundary - 1)
-        state.pending = state.pending:sub(boundary + 1)
-        state.queued = state.queued + #record
-        if state.queued > MAX_BYTES then
-          close_peer(peer)
-          return
-        end
+      if state.latest and not state.scheduled then
+        state.scheduled = true
         vim.schedule(function()
-          state.queued = state.queued - #record
-          if epoch ~= generation or not peers[peer] then
+          state.scheduled = false
+          local record = state.latest
+          state.latest = nil
+          if not record or epoch ~= generation or not peers[peer] then
             return
           end
           local ok, event = pcall(vim.json.decode, record)

@@ -217,7 +217,7 @@ for paused control, and :AgentLensStart to restart transports after errors.
 Defaults (partial nested opts merge with these):
 >lua
   require('agent-lens').setup({
-    enabled = true, watch_dir = nil, diff_source = 'git',
+    enabled = true, watch_dir = nil,
     debounce_ms = 150, max_timeline_entries = 200,
     timeline_position = 'right', timeline_width = 42, timeline_height = 15,
     timeline = { view = 'files', filter = 'all' },
@@ -246,11 +246,12 @@ Defaults (partial nested opts merge with these):
         '*.swp', '*.swo', '*~', '*.pyc', '__pycache__/**', '.git/**',
         'node_modules/**', '.DS_Store', '*.lock', 'lazy-lock.json',
       },
-      min_change_bytes = 1,
     },
   })
 <
-Panel position: right/left/bottom. Diff layout: vertical/horizontal. Follow
+Invalid option types or values are reported once and replaced by defaults.
+Git ignore rules also apply to watched files; glob patterns match literally
+except `*`, `?` and `[...]`/`[!...]`. Panel position: right/left/bottom. Diff layout: vertical/horizontal. Follow
 mode: current/split. Split position: right/left; width 0 means half width,
 positive integer widths clamp. Timeline view: files/events; filter:
 all/reads/edits. Animation duration: 0-400 ms. Theme-linked groups need no icons
@@ -284,7 +285,8 @@ active Git directory's agent-lens/reads.jsonl (new files mode 0600). Contents,
 patches, prompts, raw deltas, output, absolute paths and secrets never enter it.
 Producer and consumer independently validate repository paths, .git exclusion,
 symlink components, lifecycle IDs/phases, ranges and edit-only progress sequence.
-Metadata polling starts at EOF; historical events are not replayed.
+Metadata polling starts at EOF; historical events are not replayed, so the
+bridge truncates the log once it exceeds 4 MiB.
 
 extensions/live-preview.js separately sends code snapshots over private local
 Unix sockets (directory 0700/socket 0600, current uid) on macOS/Linux. No draft

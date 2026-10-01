@@ -1,10 +1,55 @@
 --- Safe current HEAD-to-disk comparisons.
 local M = {}
 local paths = require("agent-lens.paths")
-local function git(root, args)
-  local command = { "git", "--literal-pathspecs", "-C", root }
+-- Coroutines started by M.async yield on Git instead of blocking the editor.
+local async_callbacks = {}
+local function resume(thread, ...)
+  local ok, result, err = coroutine.resume(thread, ...)
+  if coroutine.status(thread) ~= "dead" then
+    return
+  end
+  local callback = async_callbacks[thread]
+  async_callbacks[thread] = nil
+  -- Deliver outside the coroutine so callbacks never yield or nest resumes.
+  vim.schedule(function()
+    if ok then
+      callback(result, err)
+    else
+      callback(nil, tostring(result))
+    end
+  end)
+end
+local function git(root, args, opts)
+  opts = opts or {}
+  local command = { "git", "-C", root }
+  if opts.literal ~= false then
+    table.insert(command, 2, "--literal-pathspecs")
+  end
   vim.list_extend(command, args)
-  return vim.system(command, { text = false }):wait()
+  local system_opts = { text = false, stdin = opts.stdin }
+  local thread = coroutine.running()
+  if not (thread and async_callbacks[thread]) then
+    return vim.system(command, system_opts):wait()
+  end
+  local started, err = pcall(vim.system, command, system_opts, function(result)
+    vim.schedule(function()
+      resume(thread, result)
+    end)
+  end)
+  if not started then
+    return { code = -1, stdout = "", stderr = tostring(err) }
+  end
+  return coroutine.yield()
+end
+--- Run a function from this module without blocking the editor.
+--- Git calls inside it yield until their process exits.
+---@param fn fun(...): any, any
+---@param callback fun(result: any, err: string|nil) Scheduled on the main loop
+---@param ... any Arguments for fn
+function M.async(fn, callback, ...)
+  local thread = coroutine.create(fn)
+  async_callbacks[thread] = callback
+  resume(thread, ...)
 end
 local function lines(text)
   if text == "" then
@@ -236,6 +281,45 @@ function M.changed_files(root)
   end
   table.sort(result)
   return result
+end
+--- Paths Git ignores, relative to root. Tracked files are never ignored.
+---@param root string
+---@param candidates string[]
+---@return table<string, boolean>
+function M.ignored(root, candidates)
+  local ignored = {}
+  if #candidates == 0 then
+    return ignored
+  end
+  -- check-ignore reads literal paths from stdin and rejects pathspec magic flags.
+  local result = git(root, { "check-ignore", "-z", "--stdin" }, {
+    literal = false,
+    stdin = table.concat(candidates, "\0") .. "\0",
+  })
+  if result.code == 0 then
+    for path in result.stdout:gmatch("([^%z]+)%z") do
+      ignored[path] = true
+    end
+  end
+  return ignored
+end
+--- Ignored untracked directories under a root-relative directory ("" for all).
+---@param root string
+---@param directory string
+---@return table<string, boolean>
+function M.ignored_directories(root, directory)
+  local args = { "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory" }
+  vim.list_extend(args, { "--", directory ~= "" and directory or "." })
+  local result = git(root, args)
+  local ignored = {}
+  if result.code == 0 then
+    for path in result.stdout:gmatch("([^%z]+)%z") do
+      if path:sub(-1) == "/" then
+        ignored[path:sub(1, -2)] = true
+      end
+    end
+  end
+  return ignored
 end
 --- Current text comparison summaries.
 ---@param root string

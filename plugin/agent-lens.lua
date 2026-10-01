@@ -1,8 +1,6 @@
---- Auto-command to register the health check.
-vim.api.nvim_create_autocmd("User", {
-  pattern = "LazyVimStarted",
-  once = true,
-  callback = function()
-    -- Health check is auto-discovered from lua/agent-lens/health.lua
-  end,
-})
+-- Commands and keymaps are registered by require("agent-lens").setup().
+-- :checkhealth agent-lens is discovered from lua/agent-lens/health.lua.
+if vim.g.loaded_agent_lens then
+  return
+end
+vim.g.loaded_agent_lens = true

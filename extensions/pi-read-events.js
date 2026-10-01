@@ -1,17 +1,36 @@
 // Load explicitly with: pi --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
 // Or: omp --extension /path/to/agent-lens.nvim/extensions/pi-read-events.js
 // Records repository-relative location metadata only. File contents are never logged.
-import { appendFileSync, lstatSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import {
+  appendFileSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  statSync,
+  truncateSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { createLivePreview } from "./live-preview.js";
 
 const AGENT = "pi";
+// The log is a live feed, not history: Neovim starts at its end and rewinds
+// when it shrinks, so an oversized log is truncated before the next record.
+const MAX_LOG_BYTES = 4 * 1024 * 1024;
+const LOG_CHECK_INTERVAL = 256;
 const RANGE_TOKEN = String.raw`(?:-\d+|\d+(?:-\d*|\+\d+|\.\.\d+)?)`;
 const READ_SELECTOR = new RegExp(
   String.raw`:(?:(?:raw:)?${RANGE_TOKEN}(?:,${RANGE_TOKEN})*(?::raw)?|raw|img|conflicts)$`,
 );
+
+function trimLog(log) {
+  try {
+    if (statSync(log).size > MAX_LOG_BYTES) truncateSync(log, 0);
+  } catch {
+    // A missing log is created by the following append.
+  }
+}
 
 function positiveInteger(value) {
   return Number.isSafeInteger(value) && value > 0 ? value : undefined;
@@ -354,6 +373,7 @@ export default function (pi) {
   let pending = new Map();
   let streaming = new Map();
   let warnedLogs = new Set();
+  let appends = 0;
   function repository(cwd) {
     if (currentRepository?.cwd === cwd) return currentRepository;
     try {
@@ -383,6 +403,7 @@ export default function (pi) {
     if (!repo?.log) return false;
     try {
       mkdirSync(dirname(repo.log), { recursive: true, mode: 0o700 });
+      if (appends++ % LOG_CHECK_INTERVAL === 0) trimLog(repo.log);
       appendFileSync(repo.log, `${JSON.stringify(event)}\n`, { mode: 0o600 });
       return true;
     } catch (error) {
@@ -474,6 +495,7 @@ export default function (pi) {
     pending = new Map();
     streaming = new Map();
     warnedLogs = new Set();
+    appends = 0;
     repository(ctx.cwd);
   });
 

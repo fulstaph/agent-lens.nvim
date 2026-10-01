@@ -57,8 +57,8 @@ one-session fallback.
 ```
 filesystem write → vim.uv.fs_event (watcher.lua)
   → debounce (configurable ms)
-  → ignore filter (glob patterns)
-  → git diff HEAD -- <file> (diff.lua)
+  → ignore filter (glob patterns, then batched git check-ignore)
+  → git diff HEAD -- <file> (diff.lua; async, one file at a time, FIFO)
   → timeline.add() + panel.render()
   → checktime → inline.record_write() (inline.lua)
   → user selects entry → diff_view.open() (diff_view.lua)
@@ -110,7 +110,8 @@ Pi/OMP streamed edit/write arguments → transient local socket
   for unchanged buffers. Full reviews use a separate tab; never :only on user tabs
   or delete modified/reused buffers. Current Follow pauses; split can continue.
 - Transport callbacks carry generations; old roots and stopped sources cannot
-  restore views/status. Graceful socket closure drains queued complete previews
+  restore views/status. Receivers decode only the newest complete snapshot per peer; senders skip
+  frames for lagging peers instead of closing. Graceful socket closure drains it
   before removing the peer, then consumes already-written metadata before deciding
   cancellation. Missing logs/no peers are waiting, not host-liveness facts.
   Status setters whitelist scalar metadata; public snapshots never expose contents.
@@ -133,6 +134,8 @@ Pi/OMP streamed edit/write arguments → transient local socket
   handoff/current/clear keep controllers separate from view ownership.
 - timeline.acknowledge/mark_all_seen/unread_ids/latest_edit_for_path/summary;
   panel.set_actions/set_filter/selected/selected_ids; panel_model.project/select.
+- diff.async(fn,callback,...) runs diff functions without blocking; Git calls
+  inside yield. diff.ignored/ignored_directories report Git ignore rules.
 - diff.review(root,path) returns FileDiff or nil/error; changed_files returns
   sorted safe NUL-delimited paths relative to the watched root, including when
   watching a Git subdirectory and including deletions/untracked files. Missing
@@ -148,6 +151,9 @@ Pi/OMP streamed edit/write arguments → transient local socket
 - **Luacheck** linting: CI runs `luacheck lua/ plugin/` with `vim` and `jit` as globals.
 - **LuaCATS annotations** (`---@class`, `---@param`, `---@return`) on all public functions and types.
 - **Immutable patterns**: prefer creating new tables over mutating existing ones (see `timeline.add()`).
+- **Never block the main loop on Git** in event paths: use `diff.async`.
+- New `tests/*.lua` files run automatically via `tests/run.sh`; fixtures driven
+  by Node tests must be excluded there.
 - **No compiled runtime dependency.** Lua + Git for Neovim; the optional Pi/OMP bridge uses Node-compatible JS APIs inside the agent runtime.
 
 ## Testing
@@ -171,23 +177,9 @@ The metadata path, follow projection, in-buffer overlays, and installable
 bridge package have behavioral tests:
 
 ```bash
-nvim --headless -u NONE -l tests/ui_workflow.lua
-nvim --headless -u NONE -l tests/review.lua
-nvim --headless -u NONE -l tests/review_diff.lua
-nvim --headless -u NONE -l tests/timeline_panel.lua
-nvim --headless -u NONE -l tests/follow_split.lua
-nvim --headless -u NONE -l tests/follow_controls.lua
-nvim --headless -u NONE -l tests/status.lua
-nvim --headless -u NONE -l tests/paths.lua
-nvim --headless -u NONE -l tests/read_events.lua
-nvim --headless -u NONE -l tests/follow.lua
-nvim --headless -u NONE -l tests/follow_lifecycle.lua
-nvim --headless -u NONE -l tests/motion.lua
-nvim --headless -u NONE -l tests/live_queue.lua
-nvim --headless -u NONE -l tests/watcher.lua
-nvim --headless -u NONE -l tests/inline.lua
+sh tests/run.sh   # every tests/*.lua in its own headless Neovim
 npm run test:extension
-npm run test:live # Real socket lifecycle plus embedded RPC input/Insert checks
+npm run test:live # Real socket lifecycle, embedded RPC input/Insert, backpressure
 npm pack --dry-run --json
 ```
 

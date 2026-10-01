@@ -31,6 +31,19 @@ local mark
 local warned_split = false
 local preview
 
+--- Run fn with input provenance suppressed. The previous state is restored even
+--- if fn errors, and nested calls (synchronous reveal frames) keep the outer guard.
+local function guarded(fn, ...)
+  local previous = guard
+  guard = true
+  local ok, result = pcall(fn, ...)
+  guard = previous
+  if not ok then
+    error(result, 0)
+  end
+  return result
+end
+
 local function clear_mark()
   if mark and vim.api.nvim_buf_is_valid(mark.buf) then
     vim.api.nvim_buf_clear_namespace(mark.buf, namespace, 0, -1)
@@ -474,24 +487,7 @@ function M.setup(options, callback)
     { group = group, pattern = "AgentLensStatusChanged", callback = owned_bar }
   )
 end
---- Render one latest validated target and optional bounded snapshot.
----@param next_target FollowTarget
----@param event? table
----@return boolean
-function M.render(next_target, event)
-  if window_mode == "split" and owned and owned.tab ~= vim.api.nvim_get_current_tabpage() then
-    return false
-  end
-  local mode = vim.fn.mode(1)
-  local unrelated_insert = window_mode == "split"
-    and owned
-    and owned.win ~= vim.api.nvim_get_current_win()
-    and mode:match("^[iR]")
-  if vim.fn.getcmdwintype() ~= "" or (mode:match("^[icRr]") and not unrelated_insert) then
-    on_input("unsafe editor mode", false)
-    return false
-  end
-  guard = true
+local function render_next(next_target, event)
   frozen = false
   target = vim.deepcopy(next_target)
   if
@@ -527,18 +523,36 @@ function M.render(next_target, event)
         line_hl_group = config.options.highlights.added,
         priority = 150,
       })
-      if done and preview.settled then
-        target.line = row
-        clear_preview()
-      end
-      guard = true
-      render()
-      guard = false
+      guarded(function()
+        if done and preview.settled then
+          target.line = row
+          clear_preview()
+        end
+        render()
+      end)
     end)
   end
-  local ok = render()
-  guard = false
-  return ok
+  return render()
+end
+
+--- Render one latest validated target and optional bounded snapshot.
+---@param next_target FollowTarget
+---@param event? table
+---@return boolean
+function M.render(next_target, event)
+  if window_mode == "split" and owned and owned.tab ~= vim.api.nvim_get_current_tabpage() then
+    return false
+  end
+  local mode = vim.fn.mode(1)
+  local unrelated_insert = window_mode == "split"
+    and owned
+    and owned.win ~= vim.api.nvim_get_current_win()
+    and mode:match("^[iR]")
+  if vim.fn.getcmdwintype() ~= "" or (mode:match("^[icRr]") and not unrelated_insert) then
+    on_input("unsafe editor mode", false)
+    return false
+  end
+  return guarded(render_next, next_target, event)
 end
 --- Freeze pixels and cancel all pending animation.
 function M.freeze()
@@ -557,9 +571,7 @@ function M.handoff()
   if not target_buffer(preview.root, preview.path, true) then
     return false
   end
-  guard = true
-  clear_preview()
-  guard = false
+  guarded(clear_preview)
   return true
 end
 --- Return the followed window and draft ownership facts.
@@ -585,15 +597,15 @@ local function release_owned()
 end
 --- Release drafts and marks, leaving real source text intact.
 function M.clear()
-  guard = true
-  motion.stop()
-  clear_preview()
-  clear_mark()
-  release_owned()
+  guarded(function()
+    motion.stop()
+    clear_preview()
+    clear_mark()
+    release_owned()
+  end)
   target = nil
   current_win = nil
   frozen = false
-  guard = false
 end
 --- Select a window mode, releasing only an unused owned split.
 ---@param mode string
@@ -602,11 +614,9 @@ function M.set_window(mode)
   if mode ~= "current" and mode ~= "split" then
     return false
   end
-  guard = true
-  release_owned()
+  guarded(release_owned)
   current_win = nil
   window_mode = mode
-  guard = false
   return true
 end
 return M

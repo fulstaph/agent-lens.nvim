@@ -15,7 +15,7 @@ jobs:
       - uses: JohnnyMorganz/stylua-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          version: latest
+          version: 2.5.2
           args: --check .
 
   luacheck:
@@ -32,14 +32,23 @@ jobs:
         run: luacheck lua/ plugin/ --globals vim jit --no-max-line-length --no-unused-args
 
   tests:
-    name: Tests (Neovim ${{ matrix.neovim }})
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, Neovim ${{ matrix.neovim }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         neovim: [v0.10.4, stable, nightly]
+        include:
+          # macOS uses the recursive FSEvents watcher and /private/tmp sockets.
+          - os: macos-latest
+            neovim: stable
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install Neovim
         uses: rhysd/action-setup-vim@v1
@@ -100,50 +109,8 @@ jobs:
             -c "lua local d = require('agent-lens.diff'); local root = d.git_root(); assert(root, 'no git root'); local fd = d.file_diff(root, 'test.txt'); assert(fd, 'no diff'); assert(fd.stats.added >= 1, 'added lines'); assert(#fd.hunks >= 1, 'hunks'); print('OK: diff engine')" \
             -c "qa!"
 
-      - name: Integrated watch pause browse review resume
-        run: nvim --headless -u NONE -l tests/ui_workflow.lua
-
-      - name: Hunk/full review and editor ownership
-        run: nvim --headless -u NONE -l tests/review.lua
-
-      - name: Safe current Git review comparisons
-        run: nvim --headless -u NONE -l tests/review_diff.lua
-
-      - name: Stable grouped timeline and acknowledgement
-        run: nvim --headless -u NONE -l tests/timeline_panel.lua
-
-      - name: Dedicated Follow split ownership
-        run: nvim --headless -u NONE -l tests/follow_split.lua
-
-      - name: Follow controls and editing handoff
-        run: nvim --headless -u NONE -l tests/follow_controls.lua
-
-      - name: Observable activity and bridge status
-        run: nvim --headless -u NONE -l tests/status.lua
-
-      - name: Safe repository paths
-        run: nvim --headless -u NONE -l tests/paths.lua
-
-      - name: Optional read feed and navigation
-        run: nvim --headless -u NONE -l tests/read_events.lua
-
-      - name: Follow Agent navigation and safety
-        run: nvim --headless -u NONE -l tests/follow.lua
-
-      - name: Follow buffer lifecycle and current-window navigation
-        run: nvim --headless -u NONE -l tests/follow_lifecycle.lua
-
-      - name: Live draft animation and viewport behavior
-        run: nvim --headless -u NONE -l tests/motion.lua
-
-      - name: Final preview delivery before socket disconnect
-        run: nvim --headless -u NONE -l tests/live_queue.lua
-
-      - name: Watcher cancellation and restart safety
-        run: nvim --headless -u NONE -l tests/watcher.lua
-
-      - name: Inline read and write activity
-        run: nvim --headless -u NONE -l tests/inline.lua
+      - name: Headless Lua behavior tests
+        run: sh tests/run.sh
 
       - name: Pi extension package and metadata contract
         run: |

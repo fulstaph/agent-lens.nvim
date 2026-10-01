@@ -59,23 +59,12 @@ local BINARY_EXTS = {
   a = true,
 }
 
---- Handle a file change event from the watcher.
----@param rel_path string Relative path from project root
----@param events table Event flags from libuv
-local function on_file_change(rel_path, events)
-  if not M._root then
-    return
-  end
-
-  -- Skip binary files (quick heuristic: check extension)
-  local ext = rel_path:match("%.([^.]+)$")
-  if ext and BINARY_EXTS[ext:lower()] then
-    return
-  end
-
-  -- Compute diff
-  local file_diff = diff_engine.file_diff(M._root, rel_path)
-
+--- Record one computed change in the timeline and editor views.
+---@param root string
+---@param change {rel_path: string, events: table}
+---@param file_diff FileDiff|nil
+local function apply_change(root, change, file_diff)
+  local rel_path, events = change.rel_path, change.events
   if events.deleted then
     timeline.add({
       rel_path = rel_path,
@@ -105,9 +94,85 @@ local function on_file_change(rel_path, events)
   end
 
   -- Hydrate Follow drafts before checktime can prompt about a newly created file.
-  follow.file_changed(M._root, rel_path)
+  follow.file_changed(root, rel_path)
   vim.cmd("silent! checktime")
-  inline.record_write(M._root, rel_path, not events.deleted and file_diff or nil)
+  inline.record_write(root, rel_path, not events.deleted and file_diff or nil)
+end
+
+-- Watcher changes are diffed one at a time, in arrival order, without blocking
+-- the editor. A path queued again before it is processed keeps one slot.
+local change_epoch = 0
+local queued, queued_by_path, draining = {}, {}, false
+
+local function reset_changes()
+  change_epoch = change_epoch + 1
+  queued, queued_by_path, draining = {}, {}, false
+end
+
+local function drain_changes()
+  if draining or #queued == 0 or not M._root then
+    return
+  end
+  draining = true
+  local root, epoch, batch = M._root, change_epoch, queued
+  queued, queued_by_path = {}, {}
+  local candidates = {}
+  for i, change in ipairs(batch) do
+    candidates[i] = change.rel_path
+  end
+  diff_engine.async(diff_engine.ignored, function(ignored)
+    local index = 0
+    local function next_change()
+      if epoch ~= change_epoch then
+        return
+      end
+      index = index + 1
+      local change = batch[index]
+      if not change then
+        draining = false
+        return drain_changes()
+      end
+      if ignored and ignored[change.rel_path] then
+        return next_change()
+      end
+      diff_engine.async(diff_engine.review, function(file_diff)
+        if epoch ~= change_epoch then
+          return
+        end
+        local ok, err = pcall(apply_change, root, change, file_diff)
+        if not ok then
+          vim.notify("[agent-lens] Cannot record change: " .. tostring(err), vim.log.levels.ERROR)
+        end
+        next_change()
+      end, root, change.rel_path)
+    end
+    next_change()
+  end, root, candidates)
+end
+
+--- Handle a file change event from the watcher.
+---@param rel_path string Relative path from project root
+---@param events table Event flags from libuv
+local function on_file_change(rel_path, events)
+  if not M._root then
+    return
+  end
+
+  -- Skip binary files (quick heuristic: check extension)
+  local ext = rel_path:match("%.([^.]+)$")
+  if ext and BINARY_EXTS[ext:lower()] then
+    return
+  end
+
+  local change = queued_by_path[rel_path]
+  if change then
+    change.events = events
+    return
+  end
+  change = { rel_path = rel_path, events = events }
+  queued_by_path[rel_path] = change
+  queued[#queued + 1] = change
+  drain_changes()
 end
 
 --- Start watching the project for file changes.
@@ -126,8 +191,13 @@ function M.start(root)
   end
   history_root = root
   M._root = root
+  reset_changes()
 
-  watcher.start(root, on_file_change)
+  watcher.start(root, on_file_change, {
+    ignored_directories = function(rel_dir)
+      return diff_engine.ignored_directories(root, rel_dir)
+    end,
+  })
   status.set("watcher", { state = watcher.is_running() and "running" or "stopped", root = root })
   if config.options.reads.enabled or follow.is_enabled() then
     read_events.start(root)
@@ -142,6 +212,7 @@ end
 --- Stop watching.
 function M.stop()
   generation = generation + 1
+  reset_changes()
   live.stop()
   watcher.stop()
   read_events.stop()
@@ -338,6 +409,7 @@ end
 ---@param opts? AgentLensOpts
 function M.setup(opts)
   generation = generation + 1
+  reset_changes()
   watcher.stop()
   read_events.stop()
   M._root = nil
@@ -451,11 +523,11 @@ function M.setup(opts)
     end, 500)
   end
 
-  -- Auto-reload open buffers when files change externally
+  -- Auto-reload open buffers when files change externally while watching
   vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "CursorHold" }, {
     group = vim.api.nvim_create_augroup("AgentLensAutoRead", { clear = true }),
     callback = function()
-      if vim.fn.getcmdwintype() == "" then
+      if watcher.is_running() and vim.fn.getcmdwintype() == "" then
         vim.cmd("silent! checktime")
       end
     end,
