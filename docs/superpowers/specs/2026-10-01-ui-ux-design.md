@@ -1,7 +1,7 @@
 # Agent Lens UI/UX design
 
 Date: 2026-10-01
-Status: interaction design approved; written specification awaiting review
+Status: interaction design and written specification approved on 2026-10-01
 
 ## Intent and agreed scope
 
