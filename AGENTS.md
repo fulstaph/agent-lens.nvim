@@ -21,6 +21,7 @@ lua/agent-lens/
 ├── inline.lua      — Persistent read-range/write-line extmarks
 ├── status.lua      — Copied observable metadata and details UI
 ├── paths.lua       — Shared repository-relative file validation
+├── follow_view.lua — Source/draft lifecycle, input provenance and safe rendering
 ├── follow.lua      — One live agent marker, safe window selection, viewport following
 ├── live.lua        — Private local-socket receiver for transient code previews
 ├── motion.lua      — Bounded UTF-8 text reveal, caret, and viewport easing
@@ -112,6 +113,7 @@ The metadata path, follow projection, in-buffer overlays, and installable
 bridge package have behavioral tests:
 
 ```bash
+nvim --headless -u NONE -l tests/follow_controls.lua
 nvim --headless -u NONE -l tests/status.lua
 nvim --headless -u NONE -l tests/paths.lua
 nvim --headless -u NONE -l tests/read_events.lua
@@ -157,3 +159,7 @@ the source and keep the Neovim consumer's independent validation in place.
 ```
 
 Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `perf`
+
+Follow control is off/following/paused. Paused tracking holds one bounded latest
+snapshot, freezes motion and restores authoritative source on settled resume.
+Input uses vim.on_key provenance; cursor autocmds alone never imply user input.

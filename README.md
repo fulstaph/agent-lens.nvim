@@ -377,3 +377,13 @@ precedence. Integrate optionally with
 %{v:lua.require('agent-lens').statusline()} (percent paths are escaped).
 User AgentLensStatusChanged fires once for coalesced observable changes.
 Status never replaces your statusline or winbar.
+
+Follow controls
+---------------
+:AgentLensPause / lens.pause_follow() freezes the view while tracking continues.
+:AgentLensResume / lens.resume_follow() (default <leader>ar) displays the newest
+safe target. Follow remains enabled while paused. Navigation and leaving the
+followed window/tab pause; Insert hands drafts back to their source, preserving
+unsaved text and normal input. Set follow.auto_pause=false to disable ordinary
+key-navigation pauses; modal/Insert protections still apply. Clear returns
+enabled Follow to waiting. Stop disables Follow and closes its transports.

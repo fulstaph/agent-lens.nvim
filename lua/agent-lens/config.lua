@@ -60,7 +60,13 @@ M.defaults = {
   auto_open_diff = false,
   reads = { enabled = false, interval_ms = 100 },
   inline = { enabled = true },
-  follow = { enabled = false, preview = true, animation = true, animation_ms = 180 },
+  follow = {
+    enabled = false,
+    preview = true,
+    animation = true,
+    animation_ms = 180,
+    auto_pause = true,
+  },
   highlights = {
     added = "DiffAdd",
     removed = "DiffDelete",
@@ -77,6 +83,7 @@ M.defaults = {
   keymaps = {
     toggle = "<leader>al",
     follow = "<leader>af",
+    resume = "<leader>ar",
     next_edit = "]a",
     prev_edit = "[a",
     open_diff = "<CR>",

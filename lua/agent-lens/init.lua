@@ -134,7 +134,7 @@ function M.stop()
   live.stop()
   watcher.stop()
   read_events.stop()
-  follow.clear()
+  follow.stop()
   M._root = nil
   status.set("watcher", { state = "stopped" })
   vim.notify("[agent-lens] Stopped watching", vim.log.levels.INFO)
@@ -172,6 +172,24 @@ function M.toggle_follow()
     vim.log.levels.INFO
   )
   return active
+end
+
+---@return boolean
+function M.pause_follow()
+  return follow.pause("manual")
+end
+---@return boolean
+function M.resume_follow()
+  if not follow.is_enabled() then
+    follow.resume()
+  end
+  if not watcher.is_running() then
+    M.start()
+  elseif M._root and not read_events.is_running() then
+    read_events.start(M._root)
+    live.start(M._root)
+  end
+  return follow.resume()
 end
 
 --- Open diff for the currently selected timeline entry.
@@ -233,6 +251,24 @@ function M.setup(opts)
   inline.setup(config.options.inline)
   follow.setup(config.options.follow)
 
+  vim.api.nvim_create_user_command(
+    "AgentLensPause",
+    M.pause_follow,
+    { desc = "Pause Follow Agent" }
+  )
+  vim.api.nvim_create_user_command(
+    "AgentLensResume",
+    M.resume_follow,
+    { desc = "Resume Follow Agent" }
+  )
+  if config.options.keymaps.resume and config.options.keymaps.resume ~= "" then
+    vim.keymap.set(
+      "n",
+      config.options.keymaps.resume,
+      M.resume_follow,
+      { desc = "Resume Follow Agent" }
+    )
+  end
   -- Register user commands
   vim.api.nvim_create_user_command(
     "AgentLensStatus",
