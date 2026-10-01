@@ -83,4 +83,20 @@ function M.resolve(root, rel_path, allow_missing)
   end
 end
 
+--- Validate a repository-relative target and restrict it to the watched directory.
+---@param root string Watched root
+---@param repository string Git repository root
+---@param path string Repository-relative path
+---@param allow_missing? boolean
+---@return string|nil Relative path from the watched root
+function M.rebase(root, repository, path, allow_missing)
+  local watched = type(root) == "string" and uv.fs_realpath(root)
+  local full = M.resolve(repository, path, allow_missing)
+  if not watched or not full or full:sub(1, #watched + 1) ~= watched .. "/" then
+    return nil
+  end
+  local relative = full:sub(#watched + 2)
+  return M.resolve(watched, relative, allow_missing) and relative or nil
+end
+
 return M

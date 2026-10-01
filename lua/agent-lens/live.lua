@@ -3,6 +3,8 @@ local follow = require("agent-lens.follow")
 local config = require("agent-lens.config")
 local uv = vim.uv
 local status = require("agent-lens.status")
+local paths = require("agent-lens.paths")
+local diff = require("agent-lens.diff")
 local M = {}
 local server
 local socket_path
@@ -23,17 +25,19 @@ end
 
 --- Get the private socket directory shared with the Pi/OMP bridge.
 ---@param root string
----@return string|nil
+---@return string|nil directory
+---@return string|nil repository_root
 function M.directory(root)
-  local real_root = uv.fs_realpath(root)
+  local real_root = diff.git_root(root)
   local tmp = uv.fs_realpath("/tmp")
   if not real_root or not tmp then
     return nil
   end
-  return tmp .. "/agent-lens-" .. uv.getuid() .. "-" .. vim.fn.sha256(real_root):sub(1, 16)
+  return tmp .. "/agent-lens-" .. uv.getuid() .. "-" .. vim.fn.sha256(real_root):sub(1, 16),
+    real_root
 end
 
-local function validate_preview(root, event)
+local function validate_preview(root, repository_root, event)
   if
     type(event) ~= "table"
     or event.v ~= 1
@@ -52,8 +56,11 @@ local function validate_preview(root, event)
     or not vim.islist(event.lines)
     or #event.lines == 0
     or #event.lines > MAX_LINES
-    or not follow.target_path(root, event.path, true)
   then
+    return false
+  end
+  local path = paths.rebase(root, repository_root, event.path, true)
+  if not path then
     return false
   end
   local size = 0
@@ -70,6 +77,7 @@ local function validate_preview(root, event)
       and event.agent:match("^[%w_%-]+$")
       and event.agent:sub(1, 32)
     or config.options.agent_name
+  event.path = path
   return true
 end
 
@@ -121,7 +129,7 @@ function M.start(root)
   if not follow.is_enabled() or config.options.follow.preview == false then
     return
   end
-  local directory = M.directory(root)
+  local directory, repository_root = M.directory(root)
   if not directory then
     return
   end
@@ -199,7 +207,7 @@ function M.start(root)
             return
           end
           local ok, event = pcall(vim.json.decode, record)
-          if ok and validate_preview(root, event) then
+          if ok and validate_preview(root, repository_root, event) then
             status.set(
               "preview",
               { state = "receiving", peers = count_peers(), last_valid_at = os.time() }

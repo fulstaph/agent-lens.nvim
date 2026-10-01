@@ -181,6 +181,9 @@ separate old/new paths. Binary, unsafe, unchanged and unavailable HEAD targets
 give a message. Create the first commit to establish a HEAD baseline.
 When watching a subdirectory, changed-file navigation stays inside it and uses
 paths relative to that watched root.
+Pi/OMP metadata and previews are also restricted to that directory and displayed
+with paths relative to it. Stopping the watcher retains the review root, so
+retained activity still opens the same repository after the working directory changes.
 Streaming writes never select a different review file/hunk for you. Switching the
 watched repository clears retained activity so old paths cannot be reviewed
 against a different HEAD.
@@ -258,11 +261,9 @@ require("agent-lens").setup({
   highlights = {
     added = "DiffAdd",
     removed = "DiffDelete",
-    changed = "DiffChange",
     header = "Title",
     timeline_file = "Directory",
     timeline_time = "Comment",
-    timeline_agent = "Keyword",
     timeline_selected = "CursorLine",
     follow = "CursorLine",
     follow_label = "DiagnosticInfo",
@@ -285,7 +286,7 @@ require("agent-lens").setup({
 ```lua
 local lens = require("agent-lens")
 lens.setup(opts)
-lens.start(root)
+lens.start(root)             -- boolean; false if the directory/watcher is unavailable
 lens.stop()
 lens.toggle()
 lens.toggle_follow()        -- boolean enabled
@@ -300,6 +301,15 @@ lens.clear()                -- activity/acknowledgement/pending marks reset
 lens.close_all()            -- timeline, review and details windows
 ```
 
+Re-running `setup()` removes previous plugin mappings that are disabled or moved,
+while preserving bindings the user has replaced. Empty strings and `false` disable mappings.
+Invalid directory options and ignore lists warn once and fall back to defaults.
+
+Integration compatibility APIs remain available through `agent-lens.diff`
+(`file_diff`, `status_summary`) and `agent-lens.timeline` (`latest_for_path`,
+`latest_edit_for_path`). They expose current comparisons and retained entries;
+timeline entries store metadata and statistics without cached diff bodies.
+
 ## How it works
 
 1. On `setup()`, a libuv `fs_event` watcher attaches to the git root directory.
@@ -307,7 +317,7 @@ lens.close_all()            -- timeline, review and details windows
    - Linux: per-directory `inotify` watchers, recursively attached.
 2. File change events are debounced (default 150ms) and filtered against ignore patterns and Git ignore rules. Linux skips watching Git-ignored directories.
 3. Each surviving event triggers `git diff HEAD -- <file>` to compute a structured diff with hunk parsing. Git runs asynchronously, one file at a time in arrival order, so the editor never waits on it.
-4. The diff is stored as a timestamped timeline entry with add/remove stats.
+4. A timestamped timeline entry stores the path, status and add/remove stats. Auto-open reviews use contents fetched asynchronously with the comparison.
 5. The timeline projects retained events into stable file groups (or a flat feed).
 6. Preview shows a current unified hunk; full review opens owned HEAD/disk scratch buffers in a separate native diff tab.
 7. Follow reloads unmodified target buffers from disk through Neovim's normal file readers. Other open buffers use `checktime` autocmds.

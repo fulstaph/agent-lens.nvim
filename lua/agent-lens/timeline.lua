@@ -14,7 +14,6 @@ local seen = {}
 ---@field kind? "read" Read entries do not have a diff
 ---@field stats {added: integer, removed: integer} Line counts
 ---@field agent string Agent name that made the edit
----@field diff_cached? table Cached FileDiff for this entry
 
 ---@type TimelineEntry[]
 M.entries = {}
@@ -26,7 +25,7 @@ M._next_id = 1
 M._path_index = {}
 
 --- Add a new entry to the timeline.
----@param entry_data {rel_path: string, status: string, kind?: string, stats?: table, agent?: string, diff?: table, range?: table}
+---@param entry_data {rel_path: string, status: string, kind?: string, stats?: table, agent?: string, range?: table}
 ---@return TimelineEntry
 function M.add(entry_data)
   local entry = {
@@ -38,7 +37,6 @@ function M.add(entry_data)
     range = entry_data.range and vim.deepcopy(entry_data.range) or nil,
     stats = entry_data.stats and vim.deepcopy(entry_data.stats) or { added = 0, removed = 0 },
     agent = entry_data.agent or config.options.agent_name,
-    diff_cached = entry_data.diff,
   }
   M._next_id = M._next_id + 1
 

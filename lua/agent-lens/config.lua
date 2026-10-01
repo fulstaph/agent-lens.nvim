@@ -1,11 +1,9 @@
 ---@class AgentLensHighlights
 ---@field added? string Highlight group for added lines
 ---@field removed? string Highlight group for removed lines
----@field changed? string Highlight group for changed lines
 ---@field header? string Highlight group for diff headers
 ---@field timeline_file? string Highlight group for filenames in timeline
 ---@field timeline_time? string Highlight group for timestamps in timeline
----@field timeline_agent? string Highlight group for agent name in timeline
 ---@field timeline_selected? string Highlight group for selected timeline entry
 ---@field follow? string Highlight group for the active agent line
 ---@field follow_label? string Highlight group for the active agent label
@@ -18,8 +16,8 @@
 ---@field next_edit? string|false Jump to next edit in timeline
 ---@field prev_edit? string|false Jump to previous edit in timeline
 ---@field open_diff? string|false Open diff for selected edit
----@field close? string|false Close all agent-lens windows
----@field refresh? string|false Force refresh the file watcher
+---@field close? string|false Close the timeline panel
+---@field refresh? string|false Refresh the timeline panel
 
 ---@class AgentLensFilter
 ---@field ignore_patterns? string[] Glob patterns to ignore, in addition to Git ignore rules
@@ -71,11 +69,9 @@ M.defaults = {
   highlights = {
     added = "DiffAdd",
     removed = "DiffDelete",
-    changed = "DiffChange",
     header = "Title",
     timeline_file = "Directory",
     timeline_time = "Comment",
-    timeline_agent = "Keyword",
     timeline_selected = "CursorLine",
     follow = "CursorLine",
     follow_label = "DiagnosticInfo",
@@ -146,6 +142,13 @@ local rules = {
 ---@param errors string[]
 ---@return any
 local function sanitize(value, default, path, errors)
+  if path == "watch_dir" then
+    if type(value) ~= "string" or value == "" then
+      errors[#errors + 1] = "watch_dir: expected a non-empty directory string"
+      return nil
+    end
+    return value
+  end
   if default == nil then
     return value
   end
@@ -155,6 +158,19 @@ local function sanitize(value, default, path, errors)
   if type(value) ~= type(default) then
     errors[#errors + 1] = string.format("%s: expected %s, got %s", path, type(default), type(value))
     return nil
+  end
+  if type(value) == "table" and vim.islist(default) then
+    if not vim.islist(value) then
+      errors[#errors + 1] = path .. ": expected a list of strings"
+      return nil
+    end
+    for _, item in ipairs(value) do
+      if type(item) ~= "string" then
+        errors[#errors + 1] = path .. ": expected a list of strings"
+        return nil
+      end
+    end
+    return vim.deepcopy(value)
   end
   if type(value) == "table" and not vim.islist(default) then
     local result = {}

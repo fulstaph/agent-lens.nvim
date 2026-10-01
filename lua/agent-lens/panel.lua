@@ -3,6 +3,7 @@ local config = require("agent-lens.config")
 local timeline = require("agent-lens.timeline")
 local model = require("agent-lens.panel_model")
 local status = require("agent-lens.status")
+local keymaps = require("agent-lens.keymaps")
 local M = { _buf = nil, _win = nil, _cursor = 1 }
 local options = { view = "files", filter = "all", unread_only = false, expanded = {} }
 local rows = {}
@@ -213,6 +214,9 @@ function M.open()
 end
 --- Close only the owned panel window.
 function M.close()
+  if M._buf then
+    keymaps.clear(M._buf)
+  end
   if M.is_open() and #vim.api.nvim_tabpage_list_wins(vim.api.nvim_win_get_tabpage(M._win)) > 1 then
     pcall(vim.api.nvim_win_close, M._win, true)
   end
@@ -261,10 +265,9 @@ local function act(callback)
 end
 --- Register actions for owned timeline buffers.
 function M._setup_keymaps()
+  keymaps.clear(M._buf)
   local function map(k, fn)
-    if k and k ~= "" then
-      vim.keymap.set("n", k, fn, { buffer = M._buf, nowait = true, silent = true })
-    end
+    keymaps.set(k, fn, { buffer = M._buf, nowait = true, silent = true })
   end
   map(config.options.keymaps.close, M.close)
   map("<Esc>", M.close)

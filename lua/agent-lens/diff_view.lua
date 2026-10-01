@@ -1,7 +1,13 @@
 --- Owned current-comparison windows. Original tabs and user buffers survive review.
 local config = require("agent-lens.config")
 local diff = require("agent-lens.diff")
+local paths = require("agent-lens.paths")
 local M = {}
+---@class ReviewSnapshot
+---@field root string
+---@field comparison FileDiff
+---@field head string[]
+---@field disk string[]
 ---@class ReviewOrigin
 ---@field tab integer
 ---@field win integer
@@ -75,14 +81,23 @@ function M.close(restore)
   end
   guard = false
 end
+local function identify(s, buf, side)
+  local name = "agent-lens://review/" .. s.id .. "/" .. side .. "/" .. s.path
+  if vim.api.nvim_buf_get_name(buf) ~= name then
+    vim.api.nvim_buf_set_name(buf, name)
+  end
+  local filetype = vim.filetype.match({ filename = s.path }) or ""
+  if vim.bo[buf].filetype ~= filetype then
+    vim.bo[buf].filetype = filetype
+  end
+end
 local function scratch(s, side, contents)
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_name(buf, "agent-lens://review/" .. s.id .. "/" .. side .. "/" .. s.path)
   vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].swapfile = false
   vim.bo[buf].modeline = false
   vim.bo[buf].undolevels = -1
-  vim.bo[buf].filetype = vim.filetype.match({ filename = s.path }) or ""
+  identify(s, buf, side)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, contents)
   vim.bo[buf].modifiable = false
   vim.bo[buf].modified = false
@@ -142,7 +157,7 @@ local function hunk_position()
     end
   end
 end
-local function draw()
+local function draw(snapshot)
   local s = session
   if not s then
     return
@@ -191,7 +206,11 @@ local function draw()
     for i, w in ipairs(s.windows) do
       if owned(w) then
         local source = i == 1 and "head_contents" or "working_contents"
-        set_lines(w.buf, diff[source](s.root, s.path) or {})
+        local contents = snapshot and snapshot[i == 1 and "head" or "disk"]
+          or diff[source](s.root, s.path)
+          or {}
+        set_lines(w.buf, contents)
+        identify(s, w.buf, i == 1 and "HEAD" or "disk")
         vim.wo[w.win].winbar = (i == 1 and "HEAD · " or "disk · ") .. label:gsub("%%", "%%%%")
       end
     end
@@ -204,12 +223,26 @@ local function prepare(entry, opts)
     notify("No review target")
     return nil
   end
-  local comparison, err = diff.review(root, entry.rel_path)
+  local snapshot = opts and opts.snapshot
+  local comparison, err
+  if snapshot then
+    if
+      snapshot.root ~= root
+      or snapshot.comparison.rel_path ~= entry.rel_path
+      or not paths.resolve(root, entry.rel_path, true)
+    then
+      notify("Unsafe or unavailable review snapshot")
+      return nil
+    end
+    comparison = snapshot.comparison
+  else
+    comparison, err = diff.review(root, entry.rel_path)
+  end
   if not comparison then
     notify(err)
     return nil
   end
-  return root, comparison
+  return root, comparison, snapshot
 end
 local function new_session(root, path, comparison, o, mode)
   serial = serial + 1
@@ -227,7 +260,7 @@ local function new_session(root, path, comparison, o, mode)
 end
 --- Preview the first current hunk in a bounded unified float.
 ---@param entry TimelineEntry
----@param opts? {root: string}
+---@param opts? {root: string, snapshot?: ReviewSnapshot}
 ---@return boolean
 function M.preview(entry, opts)
   local root, comparison = prepare(entry, opts)
@@ -256,10 +289,10 @@ function M.preview(entry, opts)
 end
 --- Open/reuse a separate native diff tab; never collapse the original layout.
 ---@param entry TimelineEntry
----@param opts? {root: string}
+---@param opts? {root: string, snapshot?: ReviewSnapshot}
 ---@return boolean
 function M.open(entry, opts)
-  local root, comparison = prepare(entry, opts)
+  local root, comparison, snapshot = prepare(entry, opts)
   if not root then
     return false
   end
@@ -274,7 +307,7 @@ function M.open(entry, opts)
     session.fd = comparison
     session.hunk = 1
     vim.api.nvim_set_current_win(session.windows[2].win)
-    draw()
+    draw(snapshot)
     return true
   end
   local o = session and session.origin or origin()
@@ -283,8 +316,10 @@ function M.open(entry, opts)
   local s = session
   vim.cmd("tabnew")
   s.tab = vim.api.nvim_get_current_tabpage()
-  local old = scratch(s, "HEAD", diff.head_contents(root, s.path) or {})
-  local new = scratch(s, "disk", diff.working_contents(root, s.path) or {})
+  local old =
+    scratch(s, "HEAD", snapshot and snapshot.head or diff.head_contents(root, s.path) or {})
+  local new =
+    scratch(s, "disk", snapshot and snapshot.disk or diff.working_contents(root, s.path) or {})
   local left = vim.api.nvim_get_current_win()
   local empty = vim.api.nvim_get_current_buf()
   vim.api.nvim_win_set_buf(left, old)
@@ -307,7 +342,7 @@ function M.open(entry, opts)
     end)
     keys(w.buf, false)
   end
-  draw()
+  draw(snapshot)
   return true
 end
 --- Navigate hunks with bounded indices.
@@ -336,28 +371,28 @@ function M.navigate_file(delta)
   if not session or session.mode ~= "full" then
     return false
   end
-  local paths, err = diff.changed_files(session.root)
+  local changed_paths, err = diff.changed_files(session.root)
   if err then
     notify(err)
     return false
   end
-  local index = delta > 0 and 0 or #paths + 1
-  for i, path in ipairs(paths) do
+  local index = delta > 0 and 0 or #changed_paths + 1
+  for i, path in ipairs(changed_paths) do
     if path == session.path then
       index = i
       break
     end
   end
-  for i = index + delta, delta > 0 and #paths or 1, delta > 0 and 1 or -1 do
-    local comparison, message = diff.review(session.root, paths[i])
+  for i = index + delta, delta > 0 and #changed_paths or 1, delta > 0 and 1 or -1 do
+    local comparison, message = diff.review(session.root, changed_paths[i])
     if comparison then
-      session.path = paths[i]
+      session.path = changed_paths[i]
       session.fd = comparison
       session.hunk = 1
       draw()
       return true
     end
-    notify(paths[i] .. ": " .. message)
+    notify(changed_paths[i] .. ": " .. message)
   end
   notify("No more current changes")
   return false

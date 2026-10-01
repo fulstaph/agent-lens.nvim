@@ -48,5 +48,27 @@ assert(#warnings == 0 and config.options.enabled == false, "valid options are si
 config.setup("not a table")
 assert(#warnings == 1 and config.options.debounce_ms == 150, "non-table options use defaults")
 
+for _, invalid in ipairs({ false, 123, "" }) do
+  warnings = {}
+  config.setup({ watch_dir = invalid })
+  assert(config.options.watch_dir == nil and #warnings == 1, "invalid optional directory")
+end
+for _, invalid in ipairs({ { false }, { 123 }, { glob = "*.tmp" }, { [2] = "*.tmp" } }) do
+  warnings = {}
+  config.setup({ filter = { ignore_patterns = invalid } })
+  assert(#warnings == 1, "invalid ignore list warns")
+  assert(
+    vim.deep_equal(config.options.filter.ignore_patterns, config.defaults.filter.ignore_patterns)
+  )
+  assert(
+    require("agent-lens.watcher")._is_ignored("file.swp", config.options.filter.ignore_patterns)
+  )
+end
+warnings = {}
+config.setup({ watch_dir = "/tmp", filter = { ignore_patterns = {} } })
+assert(config.options.watch_dir == "/tmp" and #config.options.filter.ignore_patterns == 0)
+assert(#warnings == 0, "valid optional directory and empty ignore list")
+assert(config.options.highlights.changed == nil and config.options.highlights.timeline_agent == nil)
+
 print("config validation OK")
 vim.cmd("qa!")
