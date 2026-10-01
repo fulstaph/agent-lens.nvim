@@ -127,9 +127,15 @@ function M.poll()
   file:seek("set", offset)
   local chunk = file:read(MAX_CHUNK) or ""
   file:close()
-  local consumed = 0
+  local records, consumed = {}, 0
   for line in chunk:gmatch("([^\n]*)\n") do
     consumed = consumed + #line + 1
+    records[#records + 1] = line
+  end
+  -- Drop an oversized incomplete record rather than rereading it forever.
+  offset = offset + (consumed == 0 and #chunk == MAX_CHUNK and #chunk or consumed)
+  -- Committed before delivery: a failing consumer must not replay the batch each poll.
+  for _, line in ipairs(records) do
     deliver(line)
   end
   -- One panel refresh per poll, however many reads arrived.
@@ -140,8 +146,6 @@ function M.poll()
       panel.render()
     end
   end
-  -- Drop an oversized incomplete record rather than rereading it forever.
-  offset = offset + (consumed == 0 and #chunk == MAX_CHUNK and #chunk or consumed)
 end
 
 --- Start at the current end of the log; historical reads are not replayed.
