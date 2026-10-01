@@ -157,8 +157,9 @@ Default `follow.window = "current"` uses a safe current-tab editor window.
 other windows can continue. Closing/reusing it pauses until explicit resume or
 mode selection. Inactive tabs freeze and a still-following split catches up on
 return. Width 0 uses half the editor; a positive width clamps. User-customized
-winbars are preserved. `auto_pause = false` disables ordinary key-navigation
-pauses; Insert and unsafe/modal protections still apply.
+winbars are preserved. Stopping Follow or switching modes keeps source splits
+with unsaved edits and releases the plugin's own winbar. `auto_pause = false`
+disables ordinary key-navigation pauses; Insert and unsafe/modal protections still apply.
 
 Hunk preview uses `]h/[h`, `R`, `<CR>` for full review and `q/Esc` to close.
 Full review uses `]h/[h`, `]f/[f`, `R`, and `q/Esc`. It opens a separate tab with

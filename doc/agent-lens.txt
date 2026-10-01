@@ -73,7 +73,8 @@ Window modes ~
   Editing unrelated windows continues normally. Interacting with the agent
   window pauses. Closing/reusing it pauses; only explicit resume/mode actions
   recreate it. Inactive tabs freeze; still-following splits catch up on return.
-  Teardown never closes a user-repurposed window. If its winbar is customized,
+  Teardown keeps user-repurposed windows and source splits with unsaved edits.
+  It removes its own winbar when releasing an edited split. If customized,
   Agent Lens stops replacing that winbar.
 
 In-buffer activity ~

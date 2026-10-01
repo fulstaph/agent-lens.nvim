@@ -570,24 +570,27 @@ function M.current()
     draft = preview ~= nil,
   }
 end
---- Release drafts and marks, leaving real source text intact.
-function M.clear()
-  guard = true
-  motion.stop()
-  clear_preview()
-  clear_mark()
+local function release_owned()
   if
     owned
     and vim.api.nvim_win_is_valid(owned.win)
     and vim.api.nvim_win_get_buf(owned.win) == owned.buf
   then
-    if #vim.api.nvim_tabpage_list_wins(owned.tab) > 1 then
+    if not vim.bo[owned.buf].modified and #vim.api.nvim_tabpage_list_wins(owned.tab) > 1 then
       pcall(vim.api.nvim_win_close, owned.win, true)
     elseif owned.bar and vim.wo[owned.win].winbar == owned.bar then
       vim.wo[owned.win].winbar = ""
     end
   end
   owned = nil
+end
+--- Release drafts and marks, leaving real source text intact.
+function M.clear()
+  guard = true
+  motion.stop()
+  clear_preview()
+  clear_mark()
+  release_owned()
   target = nil
   current_win = nil
   frozen = false
@@ -601,15 +604,7 @@ function M.set_window(mode)
     return false
   end
   guard = true
-  if
-    owned
-    and vim.api.nvim_win_is_valid(owned.win)
-    and vim.api.nvim_win_get_buf(owned.win) == owned.buf
-    and #vim.api.nvim_tabpage_list_wins(owned.tab) > 1
-  then
-    pcall(vim.api.nvim_win_close, owned.win, true)
-  end
-  owned = nil
+  release_owned()
   current_win = nil
   window_mode = mode
   guard = false

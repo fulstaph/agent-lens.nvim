@@ -191,14 +191,19 @@ function M.pause_follow()
 end
 ---@return boolean
 function M.resume_follow()
-  if not follow.is_enabled() then
+  local enabling = not follow.is_enabled()
+  if enabling then
     follow.resume()
   end
   if not watcher.is_running() then
     M.start()
-  elseif M._root and not read_events.is_running() then
-    read_events.start(M._root)
-    live.start(M._root)
+  elseif M._root then
+    if not read_events.is_running() then
+      read_events.start(M._root)
+    end
+    if enabling then
+      live.start(M._root)
+    end
   end
   return follow.resume()
 end

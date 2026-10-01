@@ -69,6 +69,29 @@ local ok, err = xpcall(function()
     vim.api.nvim_buf_get_lines(unsaved, 0, -1, false)[1] == "unsaved"
       and vim.api.nvim_win_is_valid(spare)
   )
+  for _, path in ipairs({ "untracked.lua", "staged.lua" }) do
+    vim.fn.writefile({ "new text" }, root .. "/" .. path)
+    if path == "staged.lua" then
+      git("add", "--", path)
+    end
+    assert(review.open({ rel_path = path }, { root = root }))
+    local sides = {}
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      local side = vim.wo[win].winbar:match("^(%w+)")
+      sides[side] = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false)
+    end
+    assert(vim.deep_equal(sides.HEAD, { "" }), "added file HEAD pane must be empty: " .. path)
+    assert(vim.deep_equal(sides.disk, { "new text" }), "added file disk pane")
+    review.close()
+  end
+  vim.fn.delete(root .. "/b.lua")
+  assert(review.open({ rel_path = "b.lua" }, { root = root }))
+  assert(
+    vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "" }),
+    "deleted disk pane empty"
+  )
+  review.close()
+  vim.fn.writefile({ "new" }, root .. "/b.lua")
   assert(review.open(entry, { root = root }))
   local reused = vim.api.nvim_get_current_win()
   local user = vim.api.nvim_create_buf(true, false)

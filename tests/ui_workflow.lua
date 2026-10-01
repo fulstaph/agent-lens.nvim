@@ -81,6 +81,24 @@ local ok, err = xpcall(function()
   end
   lens.stop()
   assert(lens.status().follow.control == "off" and lens.status().preview.state == "disabled")
+  lens.setup({ enabled = false, reads = { enabled = true }, follow = { enabled = true } })
+  lens.start(root)
+  assert(not lens.toggle_follow())
+  assert(require("agent-lens.read_events").is_running(), "read polling stays enabled")
+  assert(lens.status().preview.state == "disabled")
+  assert(lens.resume_follow())
+  assert(lens.status().preview.state == "listening", "resume from off restarts preview receiver")
+  follow.pause("manual")
+  local live = require("agent-lens.live")
+  local start = live.start
+  local restarts = 0
+  live.start = function(...)
+    restarts = restarts + 1
+    return start(...)
+  end
+  local resumed = lens.resume_follow()
+  live.start = start
+  assert(resumed and restarts == 0, "ordinary paused resume retains active preview receiver")
   lens.start(root)
   lens.setup({ enabled = false })
   assert(

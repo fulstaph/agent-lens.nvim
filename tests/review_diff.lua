@@ -58,6 +58,24 @@ local ok, err = xpcall(function()
   vim.fn.writefile({ "linked" }, linked .. "/partial.lua")
   assert(diff.review(linked, "partial.lua").stats.added == 1, "worktree HEAD")
   git("worktree", "remove", "--force", linked)
+  for _, path in ipairs({ "ordinary.txt", "Binary files notes.txt" }) do
+    vim.fn.writefile(
+      { path == "ordinary.txt" and "Binary files are skipped" or "ordinary line" },
+      root .. "/" .. path
+    )
+    local text, reason = diff.review(root, path)
+    assert(
+      text and text.stats.added == 1,
+      "ordinary text is reviewable: " .. path .. " " .. tostring(reason)
+    )
+  end
+  vim.fn.writefile({ "forced.bin -diff" }, root .. "/.gitattributes")
+  vim.fn.writefile({ "before" }, root .. "/forced.bin")
+  git("add", ".gitattributes", "forced.bin")
+  git("commit", "-m", "binary attribute")
+  vim.fn.writefile({ "after" }, root .. "/forced.bin")
+  local forced, reason = diff.review(root, "forced.bin")
+  assert(forced == nil and reason:lower():find("binary"), "Git binary marker still rejected")
   print("review diff behavior OK")
 end, debug.traceback)
 vim.fn.delete(root, "rf")

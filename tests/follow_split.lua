@@ -83,6 +83,42 @@ local ok, err = xpcall(function()
     "repurposed split survives"
   )
   assert(not follow.set_window("wrong"))
+  for _, action in ipairs({ "stop", "mode" }) do
+    follow.setup(config.options.follow)
+    assert(follow.set_window("split"))
+    follow.record_location(root, {
+      call_id = "edited-" .. action,
+      phase = "start",
+      tool = "read",
+      path = "file.lua",
+      line = 1,
+      agent = "pi",
+    })
+    local edited = view.current().win
+    vim.api.nvim_set_current_win(edited)
+    vim.api.nvim_feedkeys(
+      "iX" .. vim.api.nvim_replace_termcodes("<Esc>", true, false, true),
+      "xt",
+      false
+    )
+    local buf = vim.api.nvim_win_get_buf(edited)
+    local text = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert(vim.bo[buf].modified and follow.state().control == "paused")
+    if action == "stop" then
+      follow.stop()
+    else
+      follow.set_window("current")
+    end
+    assert(vim.api.nvim_win_is_valid(edited), "edited Follow split survives " .. action)
+    assert(
+      vim.api.nvim_win_get_buf(edited) == buf
+        and vim.deep_equal(text, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    )
+    assert(vim.wo[edited].winbar == "", "plugin-owned bar released")
+    vim.bo[buf].modified = false
+    vim.api.nvim_set_current_win(win)
+    vim.api.nvim_win_close(edited, true)
+  end
   vim.o.columns = 25
   assert(follow.set_window("split"))
   follow.resume()

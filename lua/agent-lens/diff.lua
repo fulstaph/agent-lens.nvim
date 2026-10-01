@@ -170,8 +170,13 @@ function M.review(root, path)
     return nil, "Git comparison failed: " .. (result.stderr or "unknown error")
   end
   local raw = lines(result.stdout)
-  if result.stdout:find("Binary files", 1, true) then
-    return nil, "Binary file cannot be reviewed as text"
+  for _, line in ipairs(raw) do
+    if line:match("^@@") then
+      break
+    end
+    if line:match("^Binary files .+ and .+ differ$") then
+      return nil, "Binary file cannot be reviewed as text"
+    end
   end
   local hunks = parse_hunks(raw)
   if #hunks == 0 then
