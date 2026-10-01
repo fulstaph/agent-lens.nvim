@@ -4,8 +4,10 @@ local timeline = require("agent-lens.timeline")
 local inline = require("agent-lens.inline")
 local follow = require("agent-lens.follow")
 
+local status = require("agent-lens.status")
+local generation = 0
 local M = {}
-local uv = vim.uv or vim.loop
+local uv = vim.uv
 local timer
 local log_path
 local root
@@ -49,6 +51,7 @@ local function deliver_read(event)
   if not valid_path(event.path, false) then
     return
   end
+  status.set("metadata", { state = "received", last_valid_at = os.time() })
   local agent = agent_name(event.agent)
   local range = read_range(event.range)
   timeline.add({
@@ -102,6 +105,7 @@ local function deliver_location(event)
       return
     end
   end
+  status.set("metadata", { state = "received", last_valid_at = os.time() })
   follow.record_location(root, {
     call_id = event.toolCallId,
     phase = event.phase,
@@ -133,6 +137,7 @@ function M.poll()
   local file, err = io.open(log_path, "rb")
   if not file then
     if not warned_open and uv.fs_stat(log_path) then
+      status.set("metadata", { state = "error", error = err })
       warned_open = true
       vim.notify("[agent-lens] Cannot read event log: " .. err, vim.log.levels.ERROR)
     end
@@ -162,6 +167,7 @@ function M.start(project)
   M.stop()
   local dir = git_dir(project)
   if not dir then
+    status.set("metadata", { state = "error", error = "Git repository unavailable" })
     vim.notify("[agent-lens] Read tracking requires a Git repository", vim.log.levels.WARN)
     return
   end
@@ -177,14 +183,22 @@ function M.start(project)
     vim.notify("[agent-lens] Could not start read tracking timer", vim.log.levels.ERROR)
     return
   end
+  status.set("metadata", { state = "waiting" })
+  local epoch = generation
   timer:start(
     config.options.reads.interval_ms,
     config.options.reads.interval_ms,
-    vim.schedule_wrap(M.poll)
+    vim.schedule_wrap(function()
+      if epoch == generation then
+        M.poll()
+      end
+    end)
   )
 end
 
 function M.stop()
+  generation = generation + 1
+  status.set("metadata", { state = "disabled" })
   if timer then
     timer:stop()
     timer:close()

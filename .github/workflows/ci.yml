@@ -60,7 +60,7 @@ jobs:
           nvim --headless -u NONE \
             -c "set rtp+=." \
             -c "lua require('agent-lens').setup({ enabled = false })" \
-            -c "lua local cmds = vim.api.nvim_get_commands({}); local expected = {'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensFollow','AgentLensInlineToggle','AgentLensStart','AgentLensStop'}; for _, name in ipairs(expected) do if not cmds[name] then print('MISSING: ' .. name); vim.cmd('cq') end end; print('OK: all commands registered')" \
+            -c "lua local cmds = vim.api.nvim_get_commands({}); local expected = {'AgentLens','AgentLensClear','AgentLensClose','AgentLensDiff','AgentLensFollow','AgentLensInlineToggle','AgentLensStart','AgentLensStop','AgentLensPause','AgentLensResume','AgentLensFollowMode','AgentLensStatus','AgentLensFilter','AgentLensPreview'}; for _, name in ipairs(expected) do if not cmds[name] then print('MISSING: ' .. name); vim.cmd('cq') end end; print('OK: all commands registered')" \
             -c "qa!"
 
       - name: Config merges correctly
@@ -68,7 +68,7 @@ jobs:
           nvim --headless -u NONE \
             -c "set rtp+=." \
             -c "lua require('agent-lens').setup({ enabled = false, agent_name = 'test-agent', debounce_ms = 500, follow = { enabled = true } })" \
-            -c "lua local c = require('agent-lens.config'); assert(c.options.agent_name == 'test-agent', 'agent_name'); assert(c.options.debounce_ms == 500, 'debounce_ms'); assert(c.options.timeline_width == 42, 'default preserved'); assert(c.options.follow.enabled, 'follow enabled'); assert(c.options.reads.interval_ms == 100, 'reads interval'); assert(c.options.highlights.follow == 'CursorLine', 'follow highlight default'); print('OK: config merge')" \
+            -c "lua local c = require('agent-lens.config'); assert(c.options.agent_name == 'test-agent', 'agent_name'); assert(c.options.debounce_ms == 500, 'debounce_ms'); assert(c.options.timeline_width == 42, 'default preserved'); assert(c.options.follow.enabled, 'follow enabled'); assert(c.options.follow.window == 'current'); assert(c.options.follow.auto_pause); assert(c.options.follow.split.width == 0); assert(c.options.timeline.view == 'files'); assert(c.options.timeline.filter == 'all'); assert(c.options.keymaps.resume == '<leader>ar'); assert(c.options.reads.interval_ms == 100, 'reads interval'); assert(c.options.highlights.follow == 'CursorLine', 'follow highlight default'); print('OK: config merge')" \
             -c "qa!"
 
       - name: Health check runs without error
@@ -100,6 +100,30 @@ jobs:
             -c "lua local d = require('agent-lens.diff'); local root = d.git_root(); assert(root, 'no git root'); local fd = d.file_diff(root, 'test.txt'); assert(fd, 'no diff'); assert(fd.stats.added >= 1, 'added lines'); assert(#fd.hunks >= 1, 'hunks'); print('OK: diff engine')" \
             -c "qa!"
 
+      - name: Integrated watch pause browse review resume
+        run: nvim --headless -u NONE -l tests/ui_workflow.lua
+
+      - name: Hunk/full review and editor ownership
+        run: nvim --headless -u NONE -l tests/review.lua
+
+      - name: Safe current Git review comparisons
+        run: nvim --headless -u NONE -l tests/review_diff.lua
+
+      - name: Stable grouped timeline and acknowledgement
+        run: nvim --headless -u NONE -l tests/timeline_panel.lua
+
+      - name: Dedicated Follow split ownership
+        run: nvim --headless -u NONE -l tests/follow_split.lua
+
+      - name: Follow controls and editing handoff
+        run: nvim --headless -u NONE -l tests/follow_controls.lua
+
+      - name: Observable activity and bridge status
+        run: nvim --headless -u NONE -l tests/status.lua
+
+      - name: Safe repository paths
+        run: nvim --headless -u NONE -l tests/paths.lua
+
       - name: Optional read feed and navigation
         run: nvim --headless -u NONE -l tests/read_events.lua
 
@@ -108,6 +132,12 @@ jobs:
 
       - name: Follow buffer lifecycle and current-window navigation
         run: nvim --headless -u NONE -l tests/follow_lifecycle.lua
+
+      - name: Live draft animation and viewport behavior
+        run: nvim --headless -u NONE -l tests/motion.lua
+
+      - name: Final preview delivery before socket disconnect
+        run: nvim --headless -u NONE -l tests/live_queue.lua
 
       - name: Watcher cancellation and restart safety
         run: nvim --headless -u NONE -l tests/watcher.lua
@@ -119,3 +149,6 @@ jobs:
         run: |
           npm run test:extension
           npm pack --dry-run --json
+
+      - name: Live code preview bridge and Neovim lifecycle
+        run: npm run test:live

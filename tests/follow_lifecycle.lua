@@ -361,6 +361,8 @@ test("active_tab", function(root)
   vim.cmd("tabnew")
   local active_win = vim.api.nvim_get_current_win()
   location(root, "second", "start", "second.txt", 1, "read")
+  assert(follow.state().control == "paused", "leaving followed tab pauses")
+  assert(follow.resume(), "explicit resume selects active tab")
   assert(vim.api.nvim_get_current_win() == active_win, "follow does not switch tab or focus")
   assert(
     vim.api.nvim_buf_get_name(0) == vim.uv.fs_realpath(root .. "/second.txt"),

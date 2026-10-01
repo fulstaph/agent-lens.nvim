@@ -179,7 +179,7 @@ assert(count() == 2, "poll does not replay events")
 local panel = require("agent-lens.panel")
 panel.open()
 assert(
-  vim.api.nvim_buf_get_lines(panel._buf, 3, 4, false)[1]:find("READ", 1, true),
+  table.concat(vim.api.nvim_buf_get_lines(panel._buf, 0, -1, false), "\n"):find("reads", 1, true),
   "timeline labels reads"
 )
 lens.show_diff()

@@ -18,10 +18,10 @@ Filesystem edits need no agent integration. Exact live locations cannot be infer
 
 ## Features
 
-- **Live edit timeline** — chronological feed of every file change with `+N / -M` stats
-- **Native Neovim diffs** — `diffthis` side-by-side (HEAD vs working tree) with full Tree-sitter highlighting
+- **Stable activity timeline** — grouped files, expandable read/edit events, filters and new-activity counts
+- **Hunk and full review** — unified hunk float or native `diffthis` in a separate tab, with changed-file navigation
 - **In-buffer activity** — recent read ranges and Git `HEAD`-to-disk changed lines are marked without opening the timeline; use `:AgentLensInlineToggle` to hide/show them
-- **Follow Agent** — opt-in Zed-style navigation opens the active Pi/OMP file, marks one current location, and labels safe streamed progress as `drafting`, execution as `applying`, and settled results as `AGENT · pi` without replacing unsaved buffers
+- **Follow Agent** — opt-in Zed-style navigation shows code appearing in a live draft, follows the generated lines, and switches to the saved file after execution without replacing unsaved buffers
 - **Zero agent coupling** — works with Pi, Claude Code, Codex CLI, Copilot CLI, OpenCode, Aider, or a human in another terminal
 - **Fast** — macOS uses native FSEvents recursive watching; Linux uses per-directory `inotify` via libuv; all events debounced
 - **Configurable** — panel position, diff layout, ignore patterns, keymaps, highlight groups
@@ -96,7 +96,7 @@ bundled host API package.
 
 In-file write highlights show the current **Git `HEAD` → disk** added/modified lines, not proof that the agent authored those lines. Pure deletions get a nearby `− deleted` label. Read highlights show the **last requested range** when the tool supplies one; a read without a known range gets a file-level label instead. Marks are hidden while a buffer has unsaved local edits, and `:AgentLensClear` removes them.
 
-Follow Agent is separate from static activity marks. It uses the current ordinary editor window, moves the cursor to the agent's line, and maintains one current marker. It never force-replaces a modified buffer. Pinned, cursor-bound, scroll-bound, diff, preview, and other special windows are left alone; Follow reuses another safe window in the current tab or opens a non-entered split. Toggle Follow off to navigate independently.
+Follow Agent is separate from static activity marks. It uses the current ordinary editor window, moves the cursor to the agent's line, and maintains one current marker. It never force-replaces a modified buffer. Pinned, cursor-bound, scroll-bound, diff, preview, and other special windows are left alone; Follow reuses another safe window in the current tab or opens a non-entered split. Manual navigation pauses Follow; `<leader>ar` resumes at the newest target. Insert hands a draft back to its real source for editing.
 
 ## Commands
 
@@ -104,8 +104,14 @@ Follow Agent is separate from static activity marks. It uses the current ordinar
 |---------|-------------|
 | `:AgentLens` | Toggle the timeline panel (starts watcher if needed) |
 | `:AgentLensStart [dir]` | Start the file watcher |
-| `:AgentLensStop` | Stop the file watcher |
-| `:AgentLensDiff` | Open diff for the selected timeline entry |
+| `:AgentLensStop` | Stop watcher/transports and disable Follow |
+| `:AgentLensDiff` | Review selected/current file against HEAD in a separate tab |
+| `:AgentLensPreview` | Preview current hunk, or open a read range |
+| `:AgentLensPause` | Freeze Follow; keep receiving activity |
+| `:AgentLensResume` | Enable/resume Follow at the latest safe target |
+| `:AgentLensFollowMode [current\|split]` | Choose mode; no argument toggles |
+| `:AgentLensFilter [all\|reads\|edits]` | Choose filter; no argument cycles |
+| `:AgentLensStatus` | Show observable activity and channel details |
 | `:AgentLensClear` | Clear the timeline and in-buffer activity |
 | `:AgentLensInlineToggle` | Hide/show read and write marks in file buffers |
 | `:AgentLensFollow` | Toggle live navigation to the active Pi/OMP location |
@@ -115,21 +121,90 @@ Follow Agent is separate from static activity marks. It uses the current ordinar
 
 ### Global
 
-| Key | Action |
-|-----|--------|
-| `<leader>al` | Toggle timeline panel |
-| `<leader>af` | Toggle Follow Agent |
-| `]a` | Next edit in timeline |
-| `[a` | Previous edit in timeline |
+`<leader>al` toggles the timeline, `<leader>af` toggles Follow, and
+`<leader>ar` resumes. An empty mapping disables the binding.
 
 ### Timeline buffer
 
 | Key | Action |
-|-----|--------|
-| `j` / `k` | Navigate entries |
-| `<CR>` | Open diff for selected entry |
-| `q` | Close timeline |
-| `R` | Refresh |
+| --- | --- |
+| `j/k`, `]a/[a` | Move selection |
+| `<Tab>` | Expand/collapse file |
+| `<CR>` | Open latest matching edit in a group, or read range |
+| `p` | Preview hunk (reads open their range) |
+| `f` | Cycle all/reads/edits |
+| `u` | Show only new activity |
+| `m` | Mark retained activity seen |
+| `g` | Switch files/events view |
+| `R`, `q/Esc` | Refresh, close |
+
+File groups preserve event history and selection as new activity arrives.
+Successful opens acknowledge matching events; scrolling does not. `+N/-M`
+counts use the latest retained edit per file, including when its newest event
+is a read. They describe retained HEAD-to-disk comparisons, not an agent-only
+or live repository-wide total.
+
+### Follow and review
+
+Follow control is **off**, **following**, or **paused**, independently of
+activity. Pausing cancels motion and freezes the visible draft/view while one
+bounded newest snapshot replaces the pending one. After success while paused,
+explicit resume shows the real source; failure/cancellation discards speculative
+content. Closing review never resumes Follow automatically.
+
+Editing commands such as `o`, `cw`, and `s` hand a draft back to its real source
+before changing text, even while paused. Unsaved source edits are preserved.
+
+Default `follow.window = "current"` uses a safe current-tab editor window.
+`follow.window = "split"` owns one agent split without taking focus; work in
+other windows can continue. Closing/reusing it pauses until explicit resume or
+mode selection. Inactive tabs freeze and a still-following split catches up on
+return. Width 0 uses half the editor; a positive width clamps. User-customized
+winbars are preserved. Stopping Follow or switching modes keeps source splits
+with unsaved edits and releases the plugin's own winbar. `auto_pause = false`
+disables ordinary key-navigation pauses; Insert and unsafe/modal protections still apply.
+
+Hunk preview uses `]h/[h`, `R`, `<CR>` for full review and `q/Esc` to close.
+Full review uses `]h/[h`, `]f/[f`, `R`, and `q/Esc`. It opens a separate tab with
+the configured split orientation, preserving original splits, views and
+unsaved text. Reused/user-added review windows survive close. The originating
+view is restored only when it still shows the original buffer.
+
+Review recomputes **current HEAD → disk** from the watched repository. An old
+selected event is not a historical patch. Partial line removal is modified;
+missing tracked files are deleted; untracked files are added; renames appear as
+separate old/new paths. Binary, unsafe, unchanged and unavailable HEAD targets
+give a message. Create the first commit to establish a HEAD baseline.
+When watching a subdirectory, changed-file navigation stays inside it and uses
+paths relative to that watched root.
+Streaming writes never select a different review file/hunk for you. Switching the
+watched repository clears retained activity so old paths cannot be reviewed
+against a different HEAD.
+
+### Activity and transport status
+
+`:AgentLensStatus` shows watched root, control/reason, latest validated activity
+and separate metadata/preview channels. Activity labels are Reading, Drafting,
+Applying, Settled, Failed and Waiting; Paused takes precedence. Missing logs
+mean waiting; an empty socket means listening. Neither proves host liveness.
+Valid data advances the receipt time; restart clears recovered errors.
+
+`lens.status()` returns copied metadata only:
+`watcher {state, root}`, `follow {control, window, reason}`,
+`activity {phase, tool, path, line, call_id}`, and
+`metadata/preview {state, last_valid_at, error}` plus preview `peers`.
+Metadata states: disabled/waiting/received/error. Preview states:
+disabled/listening/receiving/error. Times are Unix seconds; no draft bodies.
+`User AgentLensStatusChanged` coalesces discrete changes for optional integrations.
+
+Optional built-in statusline integration (Agent Lens never replaces yours):
+
+```lua
+vim.o.statusline = "%{%v:lua.require'agent-lens'.statusline()%}"
+```
+
+The returned string escapes statusline percent directives; the reevaluated
+expression above renders percent signs in filenames correctly.
 
 ## Configuration
 
@@ -144,6 +219,7 @@ require("agent-lens").setup({
   max_timeline_entries = 200,    -- Max entries in the timeline
   timeline_position = "right",   -- "right", "left", or "bottom"
   timeline_width = 42,           -- Width of the timeline panel
+  timeline = { view = "files", filter = "all" },
   timeline_height = 15,          -- Height (when position = "bottom")
   diff_layout = "vertical",     -- "vertical" or "horizontal"
   auto_open_diff = false,        -- Auto-open diff on each new edit
@@ -157,11 +233,18 @@ require("agent-lens").setup({
   },
   follow = {
     enabled = false,            -- Opt in to live Pi/OMP navigation
+    preview = true,             -- Show streamed code in a temporary read-only draft
+    animation = true,           -- Reveal generated text and ease viewport movement
+    animation_ms = 180,         -- Maximum reveal duration per incoming batch
+    auto_pause = true,
+    window = "current",         -- "current" or "split"
+    split = { position = "right", width = 0 },
   },
 
   keymaps = {
     toggle = "<leader>al",
     follow = "<leader>af",
+    resume = "<leader>ar",
     next_edit = "]a",
     prev_edit = "[a",
     open_diff = "<CR>",
@@ -180,6 +263,7 @@ require("agent-lens").setup({
     timeline_selected = "CursorLine",
     follow = "CursorLine",
     follow_label = "DiagnosticInfo",
+    follow_cursor = "DiagnosticInfo",
   },
 
   filter = {
@@ -194,6 +278,26 @@ require("agent-lens").setup({
 })
 ```
 
+## Lua API
+
+```lua
+local lens = require("agent-lens")
+lens.setup(opts)
+lens.start(root)
+lens.stop()
+lens.toggle()
+lens.toggle_follow()        -- boolean enabled
+lens.pause_follow()         -- boolean
+lens.resume_follow()        -- boolean; enables and starts sources as needed
+lens.set_follow_window("split") -- boolean
+lens.preview()              -- boolean success
+lens.show_diff()            -- boolean success
+lens.status()               -- copied StatusSnapshot
+lens.statusline()           -- escaped compact string
+lens.clear()                -- activity/acknowledgement/pending marks reset
+lens.close_all()            -- timeline, review and details windows
+```
+
 ## How it works
 
 1. On `setup()`, a libuv `fs_event` watcher attaches to the git root directory.
@@ -202,8 +306,8 @@ require("agent-lens").setup({
 2. File change events are debounced (default 150ms) and filtered against ignore patterns.
 3. Each surviving event triggers `git diff HEAD -- <file>` to compute a structured diff with hunk parsing.
 4. The diff is stored as a timestamped timeline entry with add/remove stats.
-5. The timeline panel renders entries newest-first with relative timestamps.
-6. Selecting an entry opens two scratch buffers (HEAD content vs working tree) in `diffthis` mode with full syntax highlighting.
+5. The timeline projects retained events into stable file groups (or a flat feed).
+6. Preview shows a current unified hunk; full review opens owned HEAD/disk scratch buffers in a separate native diff tab.
 7. Follow reloads unmodified target buffers from disk through Neovim's normal file readers. Other open buffers use `checktime` autocmds.
 8. The optional Pi/OMP bridge appends correlated metadata-only tool locations. Follow Agent navigates the current safe editor window and cursor, keeps exactly one marker, and ignores late completions from older parallel calls.
 
@@ -239,7 +343,31 @@ sides:
    ```
 3. Trigger a built-in `read`, `edit`, or `write`. Follow Agent shows one
    marker whose label moves from `drafting` to `applying` to settled
-   `AGENT · pi` as correlated lifecycle records arrive.
+   `AGENT · pi` as correlated lifecycle records arrive. When the host streams
+   edit or write arguments, code appears in a temporary read-only draft and
+   the cursor follows the generated lines, including partially typed lines.
+
+Live drafts use a private local Unix socket on macOS and Linux. Draft code
+stays in memory; it is never written to the metadata log, a swap file, or the
+target file. The preview supports full-file writes, Pi `oldText`/`newText`
+replacements, numeric OMP hashline replacements and insertions, and patch
+additions or updates with unique source context. Updates are coalesced every
+25 ms. Drafts are limited to 1 MiB and 20,000 lines; unsupported or ambiguous
+edits fall back to location following. Each Neovim instance has its own socket,
+which is removed when Follow stops or Neovim exits.
+
+The draft stays visible while the tool applies its edit, then Follow opens
+the actual source buffer from disk. A failure or cancelled stream removes
+the draft. Unsaved source buffers keep their text; Follow uses a safe split
+when the current buffer has unsaved edits. Set `follow.preview = false` to
+use location following without a content receiver.
+
+Drafts reveal changed text progressively with a caret at the generated column
+and a highlighted active line. Untouched context stays in place; the viewport
+eases when the caret approaches its edge. Incoming batches catch up within
+180 ms, including a final batch that arrives just before tool completion.
+Set `follow.animation = false` for immediate updates, or adjust
+`follow.animation_ms` (0–400 ms). Large changes skip the reveal to stay responsive.
 
 The streamed bridge reads Pi/OMP `message_update` tool-call arguments but
 emits metadata only at complete, safe file-section or hunk boundaries, never
@@ -247,8 +375,8 @@ per token. `progress` records are edit-only and carry an optional positive
 `line` plus a monotonic `sequence` per tool call. Neovim validates phase,
 tool, sequence, line, repository containment, `.git`, and symlink safety again.
 `start` reconciles speculative metadata, and `tool_result` remains authoritative.
-Some providers expose only one complete delta, so Follow makes one jump rather
-than fabricating animation.
+Some providers expose only one complete delta. Its received content can still
+be revealed visually; code cannot appear before the host sends it.
 
 The extension writes **only repository-relative paths, bounded lifecycle IDs,
 tool names, phases, and optional line/sequence/range metadata** to
@@ -258,12 +386,13 @@ paths, or secrets. The package uses the same bridge through both
 `omp.extensions` and `pi.extensions`; run `npm run test:extension` to verify
 the manifest and privacy contract.
 
-Follow Agent refreshes source buffers only from files on disk, using Neovim's
-normal file-reading hooks. It never pastes streamed edit bodies, adds virtual
-diff lines, or overwrites unsaved buffer contents. A missing draft is not attached
-to Neovim's file-created warning; when its file appears unmodified, Follow loads
-it. If you have unsaved text, Follow keeps that draft and reports the conflict.
-Failed loads are reported rather than presented as successful empty buffers.
+Source buffers refresh from disk using Neovim's normal file-reading hooks.
+Streamed code appears in a separate `agent-lens://draft/…` buffer and never
+overwrites source-buffer contents. Without a content preview, a missing edit
+target can still show a location-only draft; when its file appears unmodified,
+Follow loads it. If you have unsaved text, Follow keeps it and reports the
+conflict. Failed loads are reported rather than presented as successful empty
+buffers.
 
 Follow does not switch window focus, create timeline entries, or clear static
 activity marks. A failed active call clears its marker; a late completion from
@@ -327,7 +456,7 @@ When multiple agents run simultaneously, filesystem edits still share one unattr
 :checkhealth agent-lens
 ```
 
-Verifies Neovim version, libuv availability, git, git repo detection, and watcher state.
+Reports Neovim, libuv, Git, watched root and observable transport facts. Use `:AgentLensStatus` for details and `:AgentLensStart` to retry transport errors.
 
 ## License
 

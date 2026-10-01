@@ -35,7 +35,7 @@ for (const entry of manifest.omp.extensions) {
   assert.equal(typeof loaded.default, "function", `callable extension: ${entry}`);
 }
 
-for (const file of ["extensions/pi-read-events.js", "README.md", "LICENSE"]) {
+for (const file of ["extensions/pi-read-events.js", "extensions/live-preview.js", "README.md", "LICENSE"]) {
   assert(manifest.files?.includes(file), `publish allowlist includes ${file}`);
 }
 assert.deepEqual(manifest.dependencies ?? {}, {});
@@ -55,7 +55,7 @@ const packedFiles = packReport
   .sort();
 assert.deepEqual(
   packedFiles,
-  ["LICENSE", "README.md", "extensions/pi-read-events.js", "package.json"],
+  ["LICENSE", "README.md", "extensions/live-preview.js", "extensions/pi-read-events.js", "package.json"],
   "package tarball contains only the distributable allowlist",
 );
 

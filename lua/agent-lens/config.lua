@@ -9,10 +9,12 @@
 ---@field timeline_selected? string Highlight group for selected timeline entry
 ---@field follow? string Highlight group for the active agent line
 ---@field follow_label? string Highlight group for the active agent label
+---@field follow_cursor? string Highlight group for the live drafting caret
 
 ---@class AgentLensKeymaps
 ---@field toggle? string Toggle the timeline panel
 ---@field follow? string Toggle Follow Agent
+---@field resume? string Resume Follow Agent
 ---@field next_edit? string Jump to next edit in timeline
 ---@field prev_edit? string Jump to previous edit in timeline
 ---@field open_diff? string Open diff for selected edit
@@ -32,6 +34,7 @@
 ---@field max_timeline_entries? integer Max entries to keep in timeline
 ---@field timeline_position? "right" | "left" | "bottom" Panel position
 ---@field timeline_width? integer Width of timeline panel (for left/right)
+---@field timeline? {view?: "files"|"events", filter?: "all"|"reads"|"edits"}
 ---@field timeline_height? integer Height of timeline panel (for bottom)
 ---@field diff_layout? "vertical" | "horizontal" Diff split direction
 ---@field auto_open_diff? boolean Auto-open diff on new edit
@@ -41,7 +44,7 @@
 ---@field agent_name? string Display name for the agent
 ---@field reads? { enabled?: boolean, interval_ms?: integer } Opt-in Pi/OMP read feed
 ---@field inline? { enabled?: boolean } Show recent activity in file buffers
----@field follow? { enabled?: boolean } Navigate the current safe editor window and cursor
+---@field follow? { enabled?: boolean, preview?: boolean, animation?: boolean, animation_ms?: integer, auto_pause?: boolean, window?: "current"|"split", split?: {position?: "left"|"right", width?: integer} } Follow locations and animate transient live drafts
 
 local M = {}
 
@@ -55,11 +58,20 @@ M.defaults = {
   timeline_position = "right",
   timeline_width = 42,
   timeline_height = 15,
+  timeline = { view = "files", filter = "all" },
   diff_layout = "vertical",
   auto_open_diff = false,
   reads = { enabled = false, interval_ms = 100 },
   inline = { enabled = true },
-  follow = { enabled = false },
+  follow = {
+    enabled = false,
+    preview = true,
+    animation = true,
+    animation_ms = 180,
+    auto_pause = true,
+    window = "current",
+    split = { position = "right", width = 0 },
+  },
   highlights = {
     added = "DiffAdd",
     removed = "DiffDelete",
@@ -71,10 +83,12 @@ M.defaults = {
     timeline_selected = "CursorLine",
     follow = "CursorLine",
     follow_label = "DiagnosticInfo",
+    follow_cursor = "DiagnosticInfo",
   },
   keymaps = {
     toggle = "<leader>al",
     follow = "<leader>af",
+    resume = "<leader>ar",
     next_edit = "]a",
     prev_edit = "[a",
     open_diff = "<CR>",

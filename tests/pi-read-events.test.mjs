@@ -49,13 +49,7 @@ try {
   symlinkSync(join(outsideRoot, "missing-dir"), join(root, "dangling"));
   writeFileSync(join(otherRoot, "other.lua"), "other\n");
 
-  const source = readFileSync(
-    new URL("../extensions/pi-read-events.js", import.meta.url),
-    "utf8",
-  );
-  const { default: extension } = await import(
-    `data:text/javascript,${encodeURIComponent(source)}`
-  );
+  const { default: extension } = await import("../extensions/pi-read-events.js");
   const handlers = new Map();
   extension({ on: (name, handler) => handlers.set(name, handler) });
 

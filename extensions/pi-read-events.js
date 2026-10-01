@@ -5,6 +5,7 @@ import { appendFileSync, lstatSync, mkdirSync, realpathSync, statSync } from "no
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { createLivePreview } from "./live-preview.js";
 
 const AGENT = "pi";
 const RANGE_TOKEN = String.raw`(?:-\d+|\d+(?:-\d*|\+\d+|\.\.\d+)?)`;
@@ -286,7 +287,7 @@ function streamedToolCall(event) {
     assistantEvent.type === "toolcall_end" ? assistantEvent.toolCall ?? indexed : indexed;
   if (
     !validToolCallId(toolCall?.id) ||
-    !["edit", "apply_patch"].includes(toolCall?.name)
+    !["edit", "apply_patch", "write"].includes(toolCall?.name)
   ) {
     return undefined;
   }
@@ -348,6 +349,7 @@ function locationRecord(phase, tool, toolCallId, target, sequence) {
 }
 
 export default function (pi) {
+  const live = createLivePreview(resolveWriteFile);
   let currentRepository;
   let pending = new Map();
   let streaming = new Map();
@@ -409,6 +411,9 @@ export default function (pi) {
     if (!toolCall) return;
     const repo = repository(ctx.cwd);
     if (!repo.root || !repo.log) return;
+    live.update(repo, ctx.cwd, toolCall);
+    // The persisted protocol stays metadata-only and edit-only.
+    if (toolCall.toolName === "write") return;
 
     const current = streaming.get(toolCall.toolCallId);
     const parsed = streamedEditTarget(
@@ -464,6 +469,7 @@ export default function (pi) {
 
 
   pi.on("session_start", (_event, ctx) => {
+    live.stop();
     currentRepository = undefined;
     pending = new Map();
     streaming = new Map();
@@ -476,14 +482,17 @@ export default function (pi) {
   pi.on("message_end", (event) => {
     if (event?.message?.role === "assistant" && event.message.stopReason !== "toolUse") {
       clearStreaming(true);
+      live.stop();
     }
   });
 
   pi.on("turn_end", () => {
     clearStreaming(true);
+    live.stop();
   });
 
   pi.on("tool_call", (event, ctx) => {
+    live.finish(event.toolCallId);
     const tool = event.toolName === "apply_patch" ? "edit" : event.toolName;
     if (
       !["read", "write", "edit"].includes(tool) ||
@@ -606,6 +615,7 @@ export default function (pi) {
   });
 
   pi.on("session_shutdown", () => {
+    live.stop();
     currentRepository = undefined;
     pending = new Map();
     streaming = new Map();

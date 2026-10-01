@@ -10,9 +10,10 @@
   },
   "homepage": "https://github.com/fulstaph/agent-lens.nvim#readme",
   "keywords": ["pi-package", "omp-extension", "neovim", "agent-lens"],
-  "files": ["extensions/pi-read-events.js", "README.md", "LICENSE"],
+  "files": ["extensions/pi-read-events.js", "extensions/live-preview.js", "README.md", "LICENSE"],
   "scripts": {
-    "test:extension": "node tests/package-manifest.test.mjs && node tests/pi-read-events.test.mjs"
+    "test:extension": "node tests/package-manifest.test.mjs && node tests/pi-read-events.test.mjs",
+    "test:live": "node tests/live-preview.test.mjs && node tests/embedded-input.test.mjs"
   },
   "omp": {
     "extensions": ["./extensions/pi-read-events.js"]

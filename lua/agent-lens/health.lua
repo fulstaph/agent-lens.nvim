@@ -12,10 +12,10 @@ function M.check()
   end
 
   -- Check vim.uv availability
-  if vim.uv or vim.loop then
-    vim.health.ok("vim.uv / vim.loop available")
+  if vim.uv then
+    vim.health.ok("vim.uv available")
   else
-    vim.health.error("vim.uv or vim.loop not available — libuv bindings missing")
+    vim.health.error("vim.uv not available — libuv bindings missing")
   end
 
   -- Check git
@@ -42,6 +42,16 @@ function M.check()
     vim.health.ok("File watcher is active")
   else
     vim.health.info("File watcher is not running — run :AgentLensStart")
+  end
+  local s = require("agent-lens.status").get()
+  vim.health.info("Follow: " .. s.follow.control .. " / " .. s.follow.window)
+  for _, section in ipairs({ "metadata", "preview" }) do
+    local c = s[section]
+    if c.state == "error" then
+      vim.health.warn(section .. ": " .. (c.error or "error") .. "; retry :AgentLensStart")
+    else
+      vim.health.info(section .. ": " .. c.state .. "; details :AgentLensStatus")
+    end
   end
 end
 
