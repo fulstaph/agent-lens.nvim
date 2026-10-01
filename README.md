@@ -34,7 +34,7 @@ Filesystem edits need no agent integration. Exact live locations cannot be infer
 
 ## Installation
 
-The current beta is **v0.1.0-beta.1**. Pin Neovim and the Pi/OMP bridge to the
+The current release is **v0.2.0**. Pin Neovim and the Pi/OMP bridge to the
 same tag using the examples below. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ### [lazy.nvim](https://github.com/folke/lazy.nvim)
@@ -42,7 +42,7 @@ same tag using the examples below. See [CHANGELOG.md](CHANGELOG.md) for release 
 ```lua
 {
   "fulstaph/agent-lens.nvim",
-  tag = "v0.1.0-beta.1",
+  tag = "v0.2.0",
   event = "VeryLazy",
   keys = {
     { "<leader>al", "<cmd>AgentLens<cr>", desc = "Toggle Agent Lens" },
@@ -73,8 +73,8 @@ The repository is also a dependency-free dual-host Pi/OMP package. Install it
 once, then restart the Pi or OMP session:
 
 ```bash
-omp install 'github:fulstaph/agent-lens.nvim#v0.1.0-beta.1'
-pi install git:github.com/fulstaph/agent-lens.nvim@v0.1.0-beta.1
+omp install 'github:fulstaph/agent-lens.nvim#v0.2.0'
+pi install git:github.com/fulstaph/agent-lens.nvim@v0.2.0
 ```
 
 For local development from this checkout:
@@ -343,8 +343,8 @@ sides:
    ```
 2. Install the bridge package, then restart the Pi or OMP session:
    ```bash
-   omp install 'github:fulstaph/agent-lens.nvim#v0.1.0-beta.1'
-   pi install git:github.com/fulstaph/agent-lens.nvim@v0.1.0-beta.1
+   omp install 'github:fulstaph/agent-lens.nvim#v0.2.0'
+   pi install git:github.com/fulstaph/agent-lens.nvim@v0.2.0
    ```
    For local development from a checkout, use `omp install .` or `pi install .`.
    The unchanged one-session fallback is:
