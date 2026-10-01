@@ -95,7 +95,9 @@ Pi/OMP streamed edit/write arguments → transient local socket
   disables it. Recent settled-call tombstones survive toggles.
 - `vim.on_key` provenance pauses before queued frames; programmatic cursor moves
   are not user input. Insert hands back source without replaying keys or replacing
-  unsaved text. Unsafe modes/window bindings always protect the editor.
+  unsaved text. Editing commands such as `o`, `cw`, and `s` must hand back source
+  before changing text, including while paused. Unsafe modes/window bindings
+  always protect the editor.
 - follow_view owns draft lifecycle and the expected split window/buffer/tab.
   Unrelated input keeps split mode following. Inactive tabs retain controller
   state and catch up on return. Reused/user-modified windows survive teardown.
@@ -108,8 +110,9 @@ Pi/OMP streamed edit/write arguments → transient local socket
   for unchanged buffers. Full reviews use a separate tab; never :only on user tabs
   or delete modified/reused buffers. Current Follow pauses; split can continue.
 - Transport callbacks carry generations; old roots and stopped sources cannot
-  restore views/status. Socket closure consumes already-written metadata before
-  deciding cancellation. Missing logs/no peers are waiting, not host-liveness facts.
+  restore views/status. Graceful socket closure drains queued complete previews
+  before removing the peer, then consumes already-written metadata before deciding
+  cancellation. Missing logs/no peers are waiting, not host-liveness facts.
   Status setters whitelist scalar metadata; public snapshots never expose contents.
 
 ### Shared types and interfaces
@@ -131,7 +134,8 @@ Pi/OMP streamed edit/write arguments → transient local socket
 - timeline.acknowledge/mark_all_seen/unread_ids/latest_edit_for_path/summary;
   panel.set_actions/set_filter/selected/selected_ids; panel_model.project/select.
 - diff.review(root,path) returns FileDiff or nil/error; changed_files returns
-  sorted safe NUL-delimited paths, including deletions/untracked files. Missing
+  sorted safe NUL-delimited paths relative to the watched root, including when
+  watching a Git subdirectory and including deletions/untracked files. Missing
   HEAD is unavailable; binary reviews are rejected; renames use delete/add paths.
 - diff_view.preview/open/navigate_hunk/navigate_file/refresh return success;
   close tears down only owned UI. Public lens.show_diff/preview return booleans.
@@ -179,6 +183,7 @@ nvim --headless -u NONE -l tests/read_events.lua
 nvim --headless -u NONE -l tests/follow.lua
 nvim --headless -u NONE -l tests/follow_lifecycle.lua
 nvim --headless -u NONE -l tests/motion.lua
+nvim --headless -u NONE -l tests/live_queue.lua
 nvim --headless -u NONE -l tests/watcher.lua
 nvim --headless -u NONE -l tests/inline.lua
 npm run test:extension

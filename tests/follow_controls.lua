@@ -81,6 +81,41 @@ local ok, err = xpcall(function()
     "input enters source"
   )
   assert(vim.api.nvim_buf_get_lines(source, 0, -1, false)[1] == "unsaved one")
+  for _, case in ipairs({
+    { keys = "oX", want = { "unsaved one", "unsaved two", "X", "unsaved three" } },
+    { keys = "cwX", want = { "unsaved one", "X two", "unsaved three" } },
+    { keys = "sX", want = { "unsaved one", "Xnsaved two", "unsaved three" } },
+  }) do
+    setup()
+    vim.cmd("edit " .. vim.fn.fnameescape(root .. "/file.lua"))
+    source = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(
+      source,
+      0,
+      -1,
+      false,
+      { "unsaved one", "unsaved two", "unsaved three" }
+    )
+    follow.record_preview(root, event(1, "draft"))
+    vim.api.nvim_set_current_win(require("agent-lens.follow_view").current().win)
+    follow.pause("manual")
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.v.errmsg = ""
+    vim.api.nvim_feedkeys(
+      case.keys .. vim.api.nvim_replace_termcodes("<Esc>", true, false, true),
+      "xt",
+      false
+    )
+    assert(
+      vim.api.nvim_get_current_buf() == source,
+      "paused draft hands back source before " .. case.keys
+    )
+    assert(
+      vim.deep_equal(case.want, vim.api.nvim_buf_get_lines(source, 0, -1, false)),
+      "paused editing preserves source text: " .. case.keys
+    )
+    assert(vim.v.errmsg == "", "paused editing does not raise E21")
+  end
   setup()
   follow.record_preview(root, event(1, "draft"))
   follow.pause("test")

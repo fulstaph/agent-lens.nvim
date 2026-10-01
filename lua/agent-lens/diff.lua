@@ -219,10 +219,17 @@ function M.changed_files(root)
   if not has_head(root) then
     return {}, "HEAD baseline unavailable"
   end
-  local tracked = git(
-    root,
-    { "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", "-z", "HEAD", "--" }
-  )
+  local tracked = git(root, {
+    "diff",
+    "--relative",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-renames",
+    "--name-only",
+    "-z",
+    "HEAD",
+    "--",
+  })
   local untracked = git(root, { "ls-files", "--others", "--exclude-standard", "-z", "--" })
   if tracked.code ~= 0 or untracked.code ~= 0 then
     return {}, "Cannot enumerate current changes"

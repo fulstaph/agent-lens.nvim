@@ -148,9 +148,12 @@ or live repository-wide total.
 
 Follow control is **off**, **following**, or **paused**, independently of
 activity. Pausing cancels motion and freezes the visible draft/view while one
-bounded newest snapshot replaces the pending one. Success while paused resumes
-to the real source; failure/cancellation discards speculative content. Closing
-review never resumes Follow automatically.
+bounded newest snapshot replaces the pending one. After success while paused,
+explicit resume shows the real source; failure/cancellation discards speculative
+content. Closing review never resumes Follow automatically.
+
+Editing commands such as `o`, `cw`, and `s` hand a draft back to its real source
+before changing text, even while paused. Unsaved source edits are preserved.
 
 Default `follow.window = "current"` uses a safe current-tab editor window.
 `follow.window = "split"` owns one agent split without taking focus; work in
@@ -172,6 +175,8 @@ selected event is not a historical patch. Partial line removal is modified;
 missing tracked files are deleted; untracked files are added; renames appear as
 separate old/new paths. Binary, unsafe, unchanged and unavailable HEAD targets
 give a message. Create the first commit to establish a HEAD baseline.
+When watching a subdirectory, changed-file navigation stays inside it and uses
+paths relative to that watched root.
 Streaming writes never select a different review file/hunk for you. Switching the
 watched repository clears retained activity so old paths cannot be reviewed
 against a different HEAD.

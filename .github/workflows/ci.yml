@@ -136,6 +136,9 @@ jobs:
       - name: Live draft animation and viewport behavior
         run: nvim --headless -u NONE -l tests/motion.lua
 
+      - name: Final preview delivery before socket disconnect
+        run: nvim --headless -u NONE -l tests/live_queue.lua
+
       - name: Watcher cancellation and restart safety
         run: nvim --headless -u NONE -l tests/watcher.lua
 

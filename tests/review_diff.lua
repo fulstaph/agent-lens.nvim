@@ -87,6 +87,29 @@ local ok, err = xpcall(function()
   vim.fn.writefile({ "after" }, root .. "/forced.bin")
   local forced, reason = diff.review(root, "forced.bin")
   assert(forced == nil and reason:lower():find("binary"), "Git binary marker still rejected")
+  vim.fn.mkdir(root .. "/nested", "p")
+  for _, path in ipairs({ "a.lua", "b.lua", "deleted.lua" }) do
+    vim.fn.writefile({ "before" }, root .. "/nested/" .. path)
+  end
+  git("add", "nested")
+  git("commit", "-m", "subdirectory fixtures")
+  vim.fn.writefile({ "after a" }, root .. "/nested/a.lua")
+  vim.fn.writefile({ "after b" }, root .. "/nested/b.lua")
+  vim.fn.writefile({ "new" }, root .. "/nested/new.lua")
+  vim.fn.delete(root .. "/nested/deleted.lua")
+  local nested = root .. "/nested"
+  assert(
+    vim.deep_equal(diff.changed_files(nested), { "a.lua", "b.lua", "deleted.lua", "new.lua" }),
+    "changed paths stay relative to the watched subdirectory"
+  )
+  for _, path in ipairs(diff.changed_files(nested)) do
+    assert(diff.review(nested, path), "enumerated subdirectory file can be reviewed: " .. path)
+  end
+  local review = require("agent-lens.diff_view")
+  assert(review.open({ rel_path = "a.lua" }, { root = nested }))
+  assert(review.navigate_file(1), "next-file review works below the repository root")
+  assert(vim.wo.winbar:find("b.lua", 1, true))
+  review.close()
   print("review diff behavior OK")
 end, debug.traceback)
 vim.fn.delete(root, "rf")

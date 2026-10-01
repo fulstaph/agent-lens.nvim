@@ -377,14 +377,18 @@ function M.setup(options, callback)
   on_input = callback
   local ns = vim.api.nvim_create_namespace("agent_lens_input")
   vim.on_key(function(key, typed)
-    if guard or frozen or not current_win or vim.api.nvim_get_current_win() ~= current_win then
+    if guard or not current_win or vim.api.nvim_get_current_win() ~= current_win then
       return
     end
     if typed ~= nil and typed == "" then
       return
     end
-    if key ~= "" and (opts.auto_pause ~= false or key:match("^[iIaAoORcsCS]$")) then
-      on_input("navigation", key:match("^[iIaAoORcsCS]$") ~= nil)
+    local editing = key:match("^[iIaAoORcsCS]$") ~= nil
+    if frozen and not editing then
+      return
+    end
+    if key ~= "" and (opts.auto_pause ~= false or editing) then
+      on_input("navigation", editing)
     end
   end, ns)
   local group = vim.api.nvim_create_augroup("AgentLensFollowInput", { clear = true })

@@ -63,17 +63,27 @@ local function valid_preview(root, event)
   return true
 end
 
-local function close_peer(peer)
-  if not peers[peer] then
+local function close_peer(peer, drain)
+  local state = peers[peer]
+  if not state or state.closed then
     return
   end
-  local state = peers[peer]
-  peers[peer] = nil
+  state.closed = true
+  if not drain then
+    peers[peer] = nil
+  end
   peer:read_stop()
   if not peer:is_closing() then
     peer:close()
   end
-  vim.schedule(function()
+  local function finish_close()
+    if peers[peer] == state then
+      if state.queued > 0 then
+        vim.schedule(finish_close)
+        return
+      end
+      peers[peer] = nil
+    end
     if state.generation == generation then
       local count = 0
       for _ in pairs(peers) do
@@ -93,7 +103,8 @@ local function close_peer(peer)
       end
       follow.preview_disconnected(state.root, state.call_id)
     end
-  end)
+  end
+  vim.schedule(finish_close)
 end
 
 --- Start a private, per-Neovim receiver for a repository.
@@ -137,11 +148,11 @@ function M.start(root)
       peer:close()
       return
     end
-    local count = 0
+    local peer_count = 0
     for _ in pairs(peers) do
-      count = count + 1
+      peer_count = peer_count + 1
     end
-    if count >= 8 then
+    if peer_count >= 8 then
       peer:close()
       return
     end
@@ -149,7 +160,7 @@ function M.start(root)
     peers[peer] = state
     peer:read_start(function(read_err, chunk)
       if read_err or not chunk then
-        close_peer(peer)
+        close_peer(peer, not read_err)
         return
       end
       state.pending = state.pending .. chunk

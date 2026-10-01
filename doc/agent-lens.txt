@@ -58,12 +58,15 @@ the followed window/tab pauses current mode. Insert hands the draft back to
 its real source, clamps row/column, preserves unsaved source text, and lets
 normal input continue without replaying a key. If source loading fails, keep
 the draft read-only, stay paused and retry with :AgentLensResume.
+Editing commands such as o, cw, and s also hand back source before changing
+text, including while paused; existing unsaved source edits are preserved.
 
 Pause keeps transports running, freezes visible draft/view, and stores one
 bounded latest pending snapshot. Resume consumes current state, not a backlog.
-Success while paused resumes to the real source. Error/cancellation discards
-speculative content; settled calls ignore late snapshots. Clear resets pending
-activity and returns enabled Follow to following/waiting. Stop disables it.
+After success while paused, explicit resume shows the real source.
+Error/cancellation discards speculative content; settled calls ignore late
+snapshots. Clear resets pending activity and returns enabled Follow to
+following/waiting. Stop disables it.
 Closing review never resumes automatically. Ordinary key-navigation pauses
 can be disabled with `follow.auto_pause=false`; modal/Insert protections remain.
 
@@ -134,6 +137,8 @@ Full comparison ~
   :AgentLensDiff opens/reuses a separate native diff tab using diff_layout.
   ]h/[h navigates hunks; ]f/[f enumerates current safe tracked/untracked/deleted
   paths in deterministic order. Binary files are skipped with a message.
+  When watching a Git subdirectory, paths stay relative to that watched root
+  and navigation only includes files inside it.
   R refreshes; q/Esc closes owned windows and returns to the origin. Navigation
   clamps at ends. Streaming writes never change the user's chosen file/hunk.
 
