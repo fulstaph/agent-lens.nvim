@@ -191,15 +191,15 @@ This task introduces no new behavior and needs no fabricated failing test.
 
 **Interfaces:** Uses the public commands and APIs from Tasks 2–7; adds no new product interface.
 
-- [ ] Write the integration scenario `watch_pause_browse_review_resume`: stream a draft, pause by user navigation, receive newer content, browse/acknowledge a grouped timeline row, review a hunk/full diff, close back to the original layout, then resume to authoritative latest data. Assert no unsaved text, protected window, or current input focus is replaced. Extend the real socket observer with control/state queries and test successful completion/connection closure while paused. If this new integration test already passes, record that result; do not manufacture a failure.
-- [ ] Run `nvim --headless -u NONE -l tests/ui_workflow.lua` and `npm run test:live`; confirm any newly exposed integration failure before changing orchestration.
-- [ ] Repair only integration failures, missing command/API wiring, or lifecycle cleanup. Verify setup/stop/clear/restart/root changes reset pending snapshots, status, acknowledgement, ownership, autocmds, and generation-guarded work consistently. Avoid refactoring unrelated watcher or extension parsing behavior.
-- [ ] Audit README, Vim help, and AGENTS.md against every command/API/default in the approved spec and this plan. Document all new modules, types, state transitions, trust/ownership rules, keymaps, exact tests, privacy limitations, and recovery commands. Add every new headless test to the existing Neovim 0.10.4/stable/nightly CI matrix. Extend command/config smoke checks to the new interfaces.
-- [ ] Run the complete existing/new Lua suites, `npm run test:extension`, `npm run test:live`, `npm pack --dry-run --json`, `stylua --check .`, available Luacheck, and `git diff --check`. Expect every available check to pass; accurately record an unavailable checker rather than claiming it passed.
-- [ ] Capture actual Neovim UI at normal and narrow widths for Follow pause/resume, selected older timeline activity receiving updates, and hunk/full review returning to existing splits. Inspect the captures; correct visible clipping, focus shifts, stale labels, and unintended cursor motion, then rerun affected checks.
-- [ ] Complete the independent review required by the selected execution method. For Native, use one fresh whole-branch reviewer on the most capable available model; for subagent-driven execution, also retain each task's implementer/reviewer gates. Address actionable findings and rerun affected verification before installing the new UI into the running session.
-- [ ] Revalidate the user's current Neovim/OMP local plugin paths. At a naturally settled agent call, safely reload Agent Lens, retaining watched root, modified-buffer hashes, existing timeline entries and selection, and user window layout. Initialize old entries as acknowledged for this first migration; new activity arriving afterward is unread. Verify new commands, status, pause/resume, and receiver readiness. Update user configuration only for missing required enablement; preserve their settings and make a backup. OMP already links this checkout; verify bridge loading without interrupting its session.
-- [ ] Commit the integrated tests/docs/fixes with `test: verify integrated agent watch and review workflows`, update plan checkboxes to reflect actual results, and report the shipped behavior and any material verification limitation. Do not mark spec acceptance items complete until their checks were performed.
+- [x] Write the integration scenario `watch_pause_browse_review_resume`: stream a draft, pause by user navigation, receive newer content, browse/acknowledge a grouped timeline row, review a hunk/full diff, close back to the original layout, then resume to authoritative latest data. Assert no unsaved text, protected window, or current input focus is replaced. Extend the real socket observer with control/state queries and test successful completion/connection closure while paused. If this new integration test already passes, record that result; do not manufacture a failure.
+- [x] Run `nvim --headless -u NONE -l tests/ui_workflow.lua` and `npm run test:live`; confirm any newly exposed integration failure before changing orchestration.
+- [x] Repair only integration failures, missing command/API wiring, or lifecycle cleanup. Verify setup/stop/clear/restart/root changes reset pending snapshots, status, acknowledgement, ownership, autocmds, and generation-guarded work consistently. Avoid refactoring unrelated watcher or extension parsing behavior.
+- [x] Audit README, Vim help, and AGENTS.md against every command/API/default in the approved spec and this plan. Document all new modules, types, state transitions, trust/ownership rules, keymaps, exact tests, privacy limitations, and recovery commands. Add every new headless test to the existing Neovim 0.10.4/stable/nightly CI matrix. Extend command/config smoke checks to the new interfaces.
+- [x] Run the complete existing/new Lua suites, `npm run test:extension`, `npm run test:live`, `npm pack --dry-run --json`, `stylua --check .`, available Luacheck, and `git diff --check`. Expect every available check to pass; accurately record an unavailable checker rather than claiming it passed.
+- [x] Capture actual Neovim UI at normal and narrow widths for Follow pause/resume, selected older timeline activity receiving updates, and hunk/full review returning to existing splits. Inspect the captures; correct visible clipping, focus shifts, stale labels, and unintended cursor motion, then rerun affected checks.
+- [x] Complete the independent review required by the selected execution method. For Native, use one fresh whole-branch reviewer on the most capable available model; for subagent-driven execution, also retain each task's implementer/reviewer gates. Address actionable findings and rerun affected verification before installing the new UI into the running session.
+- [x] Revalidate the user's current Neovim/OMP local plugin paths. At a naturally settled agent call, safely reload Agent Lens, retaining watched root, modified-buffer hashes, existing timeline entries and selection, and user window layout. Initialize old entries as acknowledged for this first migration; new activity arriving afterward is unread. Verify new commands, status, pause/resume, and receiver readiness. Update user configuration only for missing required enablement; preserve their settings and make a backup. OMP already links this checkout; verify bridge loading without interrupting its session.
+- [x] Commit the integrated tests/docs/fixes with `test: verify integrated agent watch and review workflows`, update plan checkboxes to reflect actual results, and report the shipped behavior and any material verification limitation. Do not mark spec acceptance items complete until their checks were performed.
 
 ## Coverage and handoff
 
@@ -224,3 +224,30 @@ implementer/reviewer gate for every task.
 Implementation starts after the user reviews this plan and chooses the
 execution method. At that point read the corresponding required execution
 skill; do not treat written-spec approval as approval of this new artifact.
+
+## Verification outcome — 2026-10-01
+
+All tasks are implemented and the local UI is active in the user's existing
+Neovim session. The final run passed all 14 Lua scripts plus the extension,
+package-manifest, real preview-socket and embedded-input suites. StyLua,
+whitespace, package allowlist, help-tag generation and health checks passed.
+Actual Neovim captures were inspected at normal and narrow widths, including
+active Insert while an unrelated agent split streams. Local Neovim is 0.12.5;
+CI covers 0.10.4, stable and nightly, but that remote matrix was not run here.
+Luacheck is unavailable locally and remains a CI check.
+
+The independent whole-branch reviewer found four Important issues. Focused
+regressions failed first, then passed after correcting added-file HEAD panes,
+preview restart on off-to-resume, edited Follow split preservation, and Git
+binary-marker detection. The full suite remained green. One Minor is deferred:
+full-review hunk navigation moves correctly but the winbar can retain the
+previous hunk index.
+
+An isolated old-to-new reload verified an open timeline's selection, retained
+entry fields, modified text, focus and existing splits. The live migration
+retained the watched repository and all 200 entries, initially acknowledged
+existing activity, preserved unsaved text and window/focus state, and verified
+the new commands, grouped timeline, pause/resume and listening preview socket.
+Metadata was waiting for new data after restart. The Neovim spec and installed
+OMP package both resolve this checkout; no host-session interruption or user
+configuration change was needed.

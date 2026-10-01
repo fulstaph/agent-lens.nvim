@@ -350,14 +350,14 @@ report any unavailable check accurately.
 
 ## Acceptance checklist
 
-- [ ] All three approved workflows are implemented without extra dependencies.
-- [ ] Follow pause/resume and editing handoff preserve editor control and text.
-- [ ] Compact status represents observed facts and supports optional integration.
-- [ ] Grouping/filtering/new activity never destabilize the selected timeline item.
-- [ ] Review uses current HEAD-to-disk data and preserves user window ownership.
-- [ ] New and existing behavior/privacy/integration tests pass.
-- [ ] README, Vim help, AGENTS.md, and CI describe the shipped behavior consistently.
-- [ ] Actual Neovim UI has been checked at normal and narrow widths.
+- [x] All three approved workflows are implemented without extra dependencies.
+- [x] Follow pause/resume and editing handoff preserve editor control and text.
+- [x] Compact status represents observed facts and supports optional integration.
+- [x] Grouping/filtering/new activity never destabilize the selected timeline item.
+- [x] Review uses current HEAD-to-disk data and preserves user window ownership.
+- [x] New and existing behavior/privacy/integration tests pass.
+- [x] README, Vim help, AGENTS.md, and CI describe the shipped behavior consistently.
+- [x] Actual Neovim UI has been checked at normal and narrow widths.
 
 Written-spec approval is followed by a separate implementation plan and choice
 of execution method before product code changes begin.
