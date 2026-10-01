@@ -114,6 +114,7 @@ The metadata path, follow projection, in-buffer overlays, and installable
 bridge package have behavioral tests:
 
 ```bash
+nvim --headless -u NONE -l tests/review.lua
 nvim --headless -u NONE -l tests/review_diff.lua
 nvim --headless -u NONE -l tests/timeline_panel.lua
 nvim --headless -u NONE -l tests/follow_split.lua
@@ -178,3 +179,8 @@ or event:id; action callbacks acknowledge only on a true return value.
 `diff.review(root,path)` returns FileDiff or nil/error for a current safe
 comparison. `changed_files(root)` sorts/deduplicates literal NUL-delimited Git
 paths, including deleted/untracked targets. Missing HEAD is unavailable.
+
+Review ownership ties each unique session buffer to its expected window.
+Origin {tab,win,buf,view} restores a view only if the same source remains.
+Full reviews use a separate tab; never :only on user tabs or delete modified
+/reused buffers. Public show_diff/preview return boolean success for panel ack.

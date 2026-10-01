@@ -98,7 +98,7 @@ local function on_file_change(rel_path, events)
   if config.options.auto_open_diff and file_diff then
     local latest = timeline.entries[#timeline.entries]
     if latest then
-      diff_view.open(latest)
+      M.show_diff(latest)
     end
   end
 
@@ -198,36 +198,107 @@ function M.set_follow_window(mode)
   return follow.set_window(mode)
 end
 
---- Open diff for the currently selected timeline entry.
+local function pause_for_review()
+  if follow.state().window == "current" then
+    follow.pause("review")
+  end
+end
+local function selected_or_current(entry)
+  if entry then
+    return entry
+  end
+  if panel.is_open() then
+    return panel.selected()
+  end
+  local root = M._root or read_events.root() or diff_engine.git_root()
+  local path = vim.api.nvim_buf_get_name(0)
+  local real = root and vim.uv.fs_realpath(root)
+  if real and path:sub(1, #real + 1) == real .. "/" then
+    return { rel_path = path:sub(#real + 2), status = "modified" }
+  end
+end
+local function open_read(entry, root)
+  local path = require("agent-lens.paths").resolve(root, entry.rel_path, false)
+  if not path then
+    vim.notify("[agent-lens] Read target unavailable", vim.log.levels.WARN)
+    return false
+  end
+  local buf = vim.fn.bufadd(path)
+  if not pcall(vim.fn.bufload, buf) then
+    return false
+  end
+  local win
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local b = vim.api.nvim_win_get_buf(w)
+    if
+      w ~= panel._win
+      and vim.api.nvim_win_get_config(w).relative == ""
+      and vim.bo[b].buftype == ""
+      and not vim.wo[w].diff
+      and not vim.wo[w].previewwindow
+      and not vim.wo[w].cursorbind
+      and not vim.wo[w].scrollbind
+      and not vim.wo[w].winfixbuf
+      and (b == buf or not vim.bo[b].modified)
+    then
+      win = w
+      break
+    end
+  end
+  if not win then
+    local ok, result = pcall(
+      vim.api.nvim_open_win,
+      buf,
+      true,
+      { split = "right", win = vim.api.nvim_get_current_win() }
+    )
+    if not ok then
+      return false
+    end
+    win = result
+  else
+    vim.api.nvim_win_set_buf(win, buf)
+    vim.api.nvim_set_current_win(win)
+  end
+  if entry.range then
+    vim.api.nvim_win_set_cursor(
+      win,
+      { math.max(1, math.min(entry.range.start, vim.api.nvim_buf_line_count(buf))), 0 }
+    )
+  end
+  return true
+end
+--- Open a current comparison or stored successful-read range.
+---@param entry? TimelineEntry
+---@return boolean
 function M.show_diff(entry)
-  entry = entry or panel.selected()
+  entry = selected_or_current(entry)
   if not entry then
-    vim.notify("[agent-lens] No entry selected", vim.log.levels.INFO)
-    return
+    vim.notify("[agent-lens] No review target", vim.log.levels.INFO)
+    return false
   end
+  pause_for_review()
+  local root = M._root or read_events.root() or diff_engine.git_root()
   if entry.kind == "read" then
-    local root = M._root or read_events.root()
-    local uv = vim.uv or vim.loop
-    local real_root = root and uv.fs_realpath(root)
-    local file = root and uv.fs_realpath(root .. "/" .. entry.rel_path)
-    if not real_root or not file or file:sub(1, #real_root + 1) ~= real_root .. "/" then
-      vim.notify("[agent-lens] Read target is no longer inside the project", vim.log.levels.WARN)
-      return
-    end
-    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-      if win ~= panel._win then
-        vim.api.nvim_set_current_win(win)
-        break
-      end
-    end
-    vim.cmd("edit " .. vim.fn.fnameescape(file))
-    if entry.range then
-      local line = math.min(entry.range.start, vim.api.nvim_buf_line_count(0))
-      vim.api.nvim_win_set_cursor(0, { line, 0 })
-    end
-    return
+    return open_read(entry, root)
   end
-  diff_view.open(entry)
+  return diff_view.open(entry, { root = root })
+end
+--- Preview the selected/current edit's first hunk, or open a read range.
+---@param entry? TimelineEntry
+---@return boolean
+function M.preview(entry)
+  entry = selected_or_current(entry)
+  if not entry then
+    vim.notify("[agent-lens] No preview target", vim.log.levels.INFO)
+    return false
+  end
+  pause_for_review()
+  local root = M._root or read_events.root() or diff_engine.git_root()
+  if entry.kind == "read" then
+    return open_read(entry, root)
+  end
+  return diff_view.preview(entry, { root = root })
 end
 
 --- Close all agent-lens windows.
@@ -259,6 +330,7 @@ function M.setup(opts)
   panel.setup(config.options.timeline)
   panel.set_actions({
     open = M.show_diff,
+    preview = M.preview,
     browse = function()
       if follow.state().window == "current" then
         follow.pause("timeline")
@@ -306,6 +378,9 @@ function M.setup(opts)
     end,
     desc = "Choose Follow window mode",
   })
+  vim.api.nvim_create_user_command("AgentLensPreview", function()
+    M.preview()
+  end, { desc = "Preview a current hunk or read range" })
   -- Register user commands
   vim.api.nvim_create_user_command(
     "AgentLensStatus",

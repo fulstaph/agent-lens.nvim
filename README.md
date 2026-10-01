@@ -419,3 +419,18 @@ Renames appear as separate old/new paths. Binary, unsafe, unchanged and missing
 HEAD comparisons give a useful message. Create the first commit to establish
 a HEAD baseline. Paths are validated again and Git paths use literal, NUL
 delimited enumeration, including spaces, Unicode, percent and flag-like names.
+
+Hunk and full review
+-------------------
+:AgentLensPreview / lens.preview() (timeline p) opens a bounded read-only unified
+hunk float: ]h/[h navigate, R refreshes current disk, CR opens full comparison,
+q/Esc closes. Without a selected timeline row, use the current watched file.
+:AgentLensDiff / lens.show_diff() opens HEAD → disk in a separate native diff
+tab, using diff_layout="vertical" or "horizontal". ]f/[f navigates current safe
+changed files; ]h/[h navigates hunks; R refreshes; q/Esc returns to the origin.
+Navigation clamps at ends and skips binary files with a message. Streaming
+writes never choose a review file/hunk for you. Reviews preserve original
+splits, views and unsaved text. Reused/user-added review windows survive close;
+only owned, unmodified scratch buffers are removed. Current Follow pauses for
+review; split Follow can continue in its owning tab. Closing never resumes.
+Read events open their recorded range in a safe source window.
