@@ -2,6 +2,7 @@
 local config = require("agent-lens.config")
 local status = require("agent-lens.status")
 local view = require("agent-lens.follow_view")
+local paths = require("agent-lens.paths")
 local M = {}
 ---@class FollowTarget
 ---@field root string
@@ -14,7 +15,6 @@ local M = {}
 ---@field sequence? integer
 local control = "off"
 local reason
-local window = "current"
 local target
 local pending
 local finished = {}
@@ -44,7 +44,7 @@ end
 local phases = { progress = "drafting", start = "applying", success = "settled", error = "failed" }
 local active_phases = { progress = true, start = true }
 local function publish()
-  status.set("follow", { control = control, window = window, reason = reason })
+  status.set("follow", { control = control, window = view.window(), reason = reason })
   status.set("activity", target and {
     phase = target.tool == "read" and target.phase == "start" and "reading" or phases[target.phase],
     tool = target.tool,
@@ -76,13 +76,12 @@ end
 ---@param allow_missing? boolean
 ---@return string|nil
 function M.target_path(root, path, allow_missing)
-  return require("agent-lens.paths").resolve(root, path, allow_missing)
+  return paths.resolve(root, path, allow_missing)
 end
 --- Configure Follow and its view.
 ---@param opts table
 function M.setup(opts)
   control = opts.enabled and "following" or "off"
-  window = opts.window or "current"
   reason = nil
   target = nil
   pending = nil
@@ -148,15 +147,13 @@ function M.set_window(mode)
   if not view.set_window(mode) then
     return false
   end
-  window = mode
   render()
-  publish()
   return true
 end
 --- Get copied control state.
 ---@return FollowState
 function M.state()
-  return { control = control, window = window, reason = reason }
+  return { control = control, window = view.window(), reason = reason }
 end
 --- Receive one bounded validated draft; paused views are untouched.
 ---@param root string
@@ -167,7 +164,7 @@ function M.record_preview(root, event)
     control == "off"
     or config.options.follow.preview == false
     or finished[event.toolCallId]
-    or not M.target_path(root, event.path, true)
+    or not paths.resolve(root, event.path, true)
     or (target and target.phase == "start" and target.call_id ~= event.toolCallId)
     or (pending and pending.toolCallId == event.toolCallId and event.sequence <= pending.sequence)
   then
@@ -263,8 +260,8 @@ end
 function M.file_changed(root, path)
   if
     target
-    and (vim.uv.fs_realpath(target.root) or target.root) == (vim.uv.fs_realpath(root) or root)
     and target.path == path
+    and (vim.uv.fs_realpath(target.root) or target.root) == (vim.uv.fs_realpath(root) or root)
   then
     render()
   end
@@ -283,25 +280,26 @@ end
 function M.is_enabled()
   return control ~= "off"
 end
---- Reset pending activity while retaining enablement.
-function M.clear()
+local function reset_activity()
   notice_generation = notice_generation + 1
   view.clear()
   target = nil
   pending = nil
+  reason = nil
+end
+--- Reset pending activity while retaining enablement.
+function M.clear()
+  reset_activity()
   finished = {}
   order = {}
-  reason = nil
   if control ~= "off" then
     control = "following"
   end
   publish()
 end
---- Stop Follow and release owned UI.
+--- Stop Follow and release owned UI; recent settled-call tombstones survive.
 function M.stop()
-  local settled, recent = finished, order
-  M.clear()
-  finished, order = settled, recent
+  reset_activity()
   control = "off"
   publish()
 end

@@ -67,6 +67,21 @@ end
 local function has_head(root)
   return git(root, { "rev-parse", "--verify", "HEAD^{commit}" }).code == 0
 end
+local function binary(text)
+  return text:find("\0", 1, true) ~= nil
+end
+local function read_text(full)
+  local file = io.open(full, "rb")
+  if not file then
+    return nil, "Cannot read disk file"
+  end
+  local text = file:read("*a")
+  file:close()
+  if binary(text) then
+    return nil, "Binary file cannot be reviewed as text"
+  end
+  return text
+end
 --- Detect the repository for a directory.
 ---@param path? string
 ---@return string|nil
@@ -78,15 +93,13 @@ function M.git_root(path)
   local directory = result.stdout:gsub("\n$", "")
   return vim.uv.fs_realpath(directory)
 end
---- Check index tracking without interpreting a path as flags or a pattern.
----@param root string
+--- Absolute Git directory of a repository, where metadata bridges write.
 ---@param path string
----@return boolean
-function M.is_tracked(root, path)
-  if not paths.resolve(root, path, true) then
-    return false
-  end
-  return git(root, { "ls-files", "--error-unmatch", "--", path }).code == 0
+---@return string|nil
+function M.git_dir(path)
+  local result = git(path, { "rev-parse", "--absolute-git-dir" })
+  local directory = result.code == 0 and result.stdout:gsub("\n$", "") or ""
+  return directory ~= "" and directory or nil
 end
 --- Read an existing HEAD blob after repository path validation.
 ---@param root string
@@ -97,7 +110,7 @@ function M.head_contents(root, path)
     return nil
   end
   local result = git(root, { "show", "HEAD:./" .. path })
-  if result.code ~= 0 or result.stdout:find("%z") then
+  if result.code ~= 0 or binary(result.stdout) then
     return nil
   end
   return lines(result.stdout)
@@ -108,19 +121,8 @@ end
 ---@return string[]|nil
 function M.working_contents(root, path)
   local full = paths.resolve(root, path, false)
-  if not full then
-    return nil
-  end
-  local file = io.open(full, "rb")
-  if not file then
-    return nil
-  end
-  local text = file:read("*a")
-  file:close()
-  if text:find("%z") then
-    return nil
-  end
-  return lines(text)
+  local text = full and read_text(full)
+  return text and lines(text) or nil
 end
 ---@class DiffHunk
 ---@field old_start integer Start line in old file (1-based)
@@ -182,30 +184,26 @@ function M.review(root, path)
   if not full then
     return nil, "Unsafe or unavailable review target"
   end
-  if not has_head(root) then
-    return nil, "HEAD baseline unavailable; create the first commit before reviewing"
-  end
   local head = git(root, { "show", "HEAD:./" .. path })
   local exists = head.code == 0
-  if exists and head.stdout:find("%z") then
+  -- A failed show means a new path, or no commit at all; only the latter is fatal.
+  if not exists and not has_head(root) then
+    return nil, "HEAD baseline unavailable; create the first commit before reviewing"
+  end
+  if exists and binary(head.stdout) then
     return nil, "Binary file cannot be reviewed as text"
   end
   local disk = vim.uv.fs_stat(full)
   if disk then
-    local file = io.open(full, "rb")
-    if not file then
-      return nil, "Cannot read disk file"
-    end
-    local text = file:read("*a")
-    file:close()
-    if text:find("%z") then
-      return nil, "Binary file cannot be reviewed as text"
+    local text, err = read_text(full)
+    if not text then
+      return nil, err
     end
   elseif not exists then
     return nil, "No current changes"
   end
   local args = { "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "-U3" }
-  if exists or M.is_tracked(root, path) then
+  if exists or git(root, { "ls-files", "--error-unmatch", "--", path }).code == 0 then
     vim.list_extend(args, { "HEAD", "--", path })
   else
     vim.list_extend(args, { "--no-index", "--", "/dev/null", full })
@@ -275,10 +273,7 @@ function M.changed_files(root)
       unique[path] = true
     end
   end
-  local result = {}
-  for path in pairs(unique) do
-    result[#result + 1] = path
-  end
+  local result = vim.tbl_keys(unique)
   table.sort(result)
   return result
 end

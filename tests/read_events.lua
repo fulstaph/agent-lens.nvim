@@ -176,6 +176,18 @@ assert(count() == 2, "completed event is delivered exactly once")
 feed.poll()
 assert(count() == 2, "poll does not replay events")
 
+-- A consumer error must not replay the batch: the offset is committed before delivery.
+local inline = require("agent-lens.inline")
+local record_read = inline.record_read
+inline.record_read = function()
+  error("consumer failed")
+end
+append('{"v":1,"kind":"read","path":"sample.lua"}\n')
+assert(not pcall(feed.poll), "consumer error surfaces")
+inline.record_read = record_read
+feed.poll()
+assert(count() == 3, "a failed batch is not replayed")
+
 local panel = require("agent-lens.panel")
 panel.open()
 assert(

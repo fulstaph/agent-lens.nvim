@@ -1,5 +1,27 @@
 local M = {}
 local uv = vim.uv
+local MAX_CALL_ID_BYTES = 256
+
+--- Whether a decoded value is a 1-based integer (sequence, line, range bound).
+---@param value any
+---@return boolean
+function M.positive_integer(value)
+  return type(value) == "number" and value % 1 == 0 and value >= 1
+end
+
+--- Whether a decoded value is a bounded, non-empty tool call ID.
+---@param value any
+---@return boolean
+function M.call_id(value)
+  return type(value) == "string" and value ~= "" and #value <= MAX_CALL_ID_BYTES
+end
+
+--- A safe display name for an agent, or nil when the value is unusable.
+---@param value any
+---@return string|nil
+function M.agent_name(value)
+  return type(value) == "string" and value:match("^[%w_%-]+$") and value:sub(1, 32) or nil
+end
 
 local function relative_path(path)
   if

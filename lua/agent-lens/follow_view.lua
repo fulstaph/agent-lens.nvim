@@ -195,9 +195,6 @@ local function create_preview(root, event)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_name(buf, "agent-lens://draft/" .. event.path)
   vim.b[buf].agent_lens_preview = true
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].modeline = false
-  vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].undolevels = -1
   vim.bo[buf].filetype = vim.filetype.match({ filename = root .. "/" .. event.path }) or ""
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, baseline)
@@ -207,29 +204,18 @@ local function create_preview(root, event)
 end
 
 local function is_editor_window(win, target_buf)
-  if
-    not win
-    or not vim.api.nvim_win_is_valid(win)
-    or vim.api.nvim_win_get_tabpage(win) ~= vim.api.nvim_get_current_tabpage()
-  then
-    return false
-  end
-  local ok, window_config = pcall(vim.api.nvim_win_get_config, win)
-  if not ok or window_config.relative ~= "" then
+  if not win or not motion.plain_window(win) then
     return false
   end
   local buf = vim.api.nvim_win_get_buf(win)
-  local name = vim.api.nvim_buf_get_name(buf)
   local draft = vim.b[buf].agent_lens_preview == true
   if
-    (vim.bo[buf].buftype ~= "" and not draft)
-    or (name:match("^agent%-lens://") and not draft)
-    or vim.wo[win].diff
-    or vim.wo[win].previewwindow
-    or vim.wo[win].cursorbind
-    or vim.wo[win].scrollbind
-    or (vim.wo[win].winfixbuf and buf ~= target_buf)
+    not draft
+    and (vim.bo[buf].buftype ~= "" or vim.api.nvim_buf_get_name(buf):match("^agent%-lens://"))
   then
+    return false
+  end
+  if vim.wo[win].winfixbuf and buf ~= target_buf then
     return false
   end
   return buf == target_buf or not vim.bo[buf].modified
@@ -237,7 +223,7 @@ end
 
 local function create_window(buf)
   local ok, win = pcall(vim.api.nvim_open_win, buf, false, {
-    split = window_mode == "split" and (opts.split and opts.split.position or "right") or "right",
+    split = window_mode == "split" and opts.split and opts.split.position or "right",
     win = vim.api.nvim_get_current_win(),
   })
   if not ok or not win then
@@ -317,15 +303,10 @@ local function center_view(win, line)
     vim.fn.winrestview({ topline = topline })
   end)
 end
+local phase_labels = { progress = " · drafting", start = " · applying" }
 local function label_for(current)
   local agent = current.agent or config.options.agent_name
-  if current.phase == "progress" then
-    return "  AGENT · " .. agent .. " · drafting"
-  end
-  if current.phase == "start" then
-    return "  AGENT · " .. agent .. " · applying"
-  end
-  return "  AGENT · " .. agent
+  return "  AGENT · " .. agent .. (phase_labels[current.phase] or "")
 end
 
 local function render()
@@ -362,7 +343,7 @@ local function render()
   end
   local requested_line = drafting and preview.line or target.line
   local line = math.max(1, math.min(requested_line or 1, vim.api.nvim_buf_line_count(buf)))
-  local placed, id = pcall(vim.api.nvim_buf_set_extmark, buf, namespace, line - 1, 0, {
+  local placed = pcall(vim.api.nvim_buf_set_extmark, buf, namespace, line - 1, 0, {
     line_hl_group = drafting and config.options.highlights.added
       or config.options.highlights.follow,
     virt_text = { { label_for(target), config.options.highlights.follow_label } },
@@ -376,7 +357,7 @@ local function render()
   if not placed then
     return false
   end
-  mark = { buf = buf, id = id }
+  mark = { buf = buf }
   if drafting then
     local text = vim.api.nvim_buf_get_lines(buf, line - 1, line, false)[1] or ""
     local col = math.min(preview.column or #text, #text)
@@ -406,7 +387,7 @@ function M.setup(options, callback)
     if guard or not current_win or vim.api.nvim_get_current_win() ~= current_win then
       return
     end
-    if typed ~= nil and typed == "" then
+    if typed == "" then
       return
     end
     local editing = key:match("^[iIaAoORcsCS]$") ~= nil
@@ -606,6 +587,10 @@ function M.clear()
   target = nil
   current_win = nil
   frozen = false
+end
+---@return 'current'|'split'
+function M.window()
+  return window_mode
 end
 --- Select a window mode, releasing only an unused owned split.
 ---@param mode string

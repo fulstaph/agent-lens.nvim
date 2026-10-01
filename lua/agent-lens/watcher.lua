@@ -18,15 +18,19 @@ M._instance = nil
 
 local uv = vim.uv
 
+local function close_handle(handle)
+  if not handle:is_closing() then
+    handle:stop()
+    handle:close()
+  end
+end
+
 local function remove_watcher(watcher, dir)
   local handle = watcher.watchers[dir]
   if not handle then
     return
   end
-  if not handle:is_closing() then
-    handle:stop()
-    handle:close()
-  end
+  close_handle(handle)
   watcher.watchers[dir] = nil
   if M._instance == watcher and watcher.running and not next(watcher.watchers) then
     M.stop()
@@ -100,8 +104,7 @@ M._is_ignored = is_ignored
 
 local function schedule_debounce(watcher, full_path, rel_path, events)
   if watcher._debounce_timers[full_path] then
-    watcher._debounce_timers[full_path]:stop()
-    watcher._debounce_timers[full_path]:close()
+    close_handle(watcher._debounce_timers[full_path])
     watcher._debounce_timers[full_path] = nil
   end
 
@@ -117,8 +120,7 @@ local function schedule_debounce(watcher, full_path, rel_path, events)
       if not watcher.running or watcher._debounce_timers[full_path] ~= timer then
         return
       end
-      timer:stop()
-      timer:close()
+      close_handle(timer)
       watcher._debounce_timers[full_path] = nil
 
       local stat = uv.fs_stat(full_path)
@@ -138,19 +140,17 @@ local function attach_watcher(watcher, dir, recursive, on_directory)
     return nil
   end
 
-  local ok = handle:start(
-    dir,
-    { recursive = recursive },
-    vim.schedule_wrap(function(err, filename, events)
-      if not watcher.running or err or not filename then
+  local ok = handle:start(dir, { recursive = recursive }, function(err, filename, events)
+    local full_path = not err and filename and dir .. "/" .. filename
+    local rel_path = full_path and (recursive and filename or full_path:sub(#watcher.root + 2))
+    -- Pure string matching is safe here, so ignored churn (such as .git/ updates from
+    -- our own Git calls) never wakes the main loop.
+    if rel_path and is_ignored(rel_path, config.options.filter.ignore_patterns) then
+      return
+    end
+    vim.schedule(function()
+      if not watcher.running or not rel_path then
         remove_watcher(watcher, dir)
-        return
-      end
-
-      local full_path = dir .. "/" .. filename
-      local rel_path = recursive and filename or full_path:sub(#watcher.root + 2)
-
-      if is_ignored(rel_path, config.options.filter.ignore_patterns) then
         return
       end
 
@@ -164,7 +164,7 @@ local function attach_watcher(watcher, dir, recursive, on_directory)
 
       schedule_debounce(watcher, full_path, rel_path, events)
     end)
-  )
+  end)
 
   if ok then
     watcher.watchers[dir] = handle
@@ -294,10 +294,7 @@ function M.stop()
   end
 
   for path, timer in pairs(watcher._debounce_timers) do
-    if not timer:is_closing() then
-      timer:stop()
-      timer:close()
-    end
+    close_handle(timer)
     watcher._debounce_timers[path] = nil
   end
 

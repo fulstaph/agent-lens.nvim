@@ -43,22 +43,26 @@ local function span(before, after)
   return first, old_end, new_end
 end
 
-local function slice(lines, first, last)
-  local result = {}
-  for index = first, last do
-    result[#result + 1] = lines[index]
-  end
-  return result
-end
-
-local function apply(buf, lines)
-  local before = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  local first, old_end, new_end = span(before, lines)
-  if first > old_end and first > new_end then
+--- Replace the revealed region, rewriting only rows that differ. Context outside
+--- the region never changes during a reveal, so it is neither read nor rebuilt.
+---@param buf integer
+---@param first integer First buffer row of the region
+---@param count integer Rows the region occupies now
+---@param body string[] Rows it should occupy
+local function apply(buf, first, count, body)
+  local current = vim.api.nvim_buf_get_lines(buf, first - 1, first - 1 + count, false)
+  local a, old_end, new_end = span(current, body)
+  if a > old_end and a > new_end then
     return
   end
   vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, first - 1, old_end, false, slice(lines, first, new_end))
+  vim.api.nvim_buf_set_lines(
+    buf,
+    first + a - 2,
+    first + old_end - 1,
+    false,
+    vim.list_slice(body, a, new_end)
+  )
   vim.bo[buf].modified = false
   vim.bo[buf].modifiable = false
 end
@@ -79,16 +83,23 @@ local function position(text, first)
   return first + count, #(text:match("[^\n]*$") or "")
 end
 
-local function safe_view(win, buf)
+--- A valid split in the current tab that is not diffed, previewing, or bound to another.
+---@param win integer
+---@return boolean
+function M.plain_window(win)
   return vim.api.nvim_win_is_valid(win)
-    and vim.api.nvim_buf_is_valid(buf)
-    and vim.api.nvim_win_get_buf(win) == buf
     and vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage()
     and vim.api.nvim_win_get_config(win).relative == ""
     and not vim.wo[win].diff
     and not vim.wo[win].previewwindow
     and not vim.wo[win].cursorbind
     and not vim.wo[win].scrollbind
+end
+
+local function safe_view(win, buf)
+  return M.plain_window(win)
+    and vim.api.nvim_buf_is_valid(buf)
+    and vim.api.nvim_win_get_buf(win) == buf
 end
 
 local function paint_view(win, state, progress)
@@ -121,31 +132,31 @@ local function paint_draft(buf, state, progress)
   end
   local revealed = utf8_boundary(state.added, math.ceil(#state.added * progress))
   local caret = state.prefix .. state.added:sub(1, revealed)
-  local lines
+  local body = state.body
   if progress == 1 then
-    lines = state.lines
     drafts[buf] = nil
   else
-    local body = vim.split(caret .. state.suffix, "\n", { plain = true })
-    lines = slice(state.before, 1, state.first - 1)
-    vim.list_extend(lines, body)
-    vim.list_extend(lines, slice(state.before, state.old_end + 1, #state.before))
+    body = vim.split(caret .. state.suffix, "\n", { plain = true })
   end
-  apply(buf, lines)
+  apply(buf, state.first, state.count, body)
+  state.count = #body
   local row, col = position(caret, state.first)
-  row = math.max(1, math.min(row, #lines))
+  row = math.max(1, math.min(row, state.first - 1 + #body + state.after))
   state.frame(row, col, progress == 1)
+end
+
+local function progress(state, time)
+  local elapsed = (time - state.started) / math.max(1, state.deadline - state.started)
+  return math.max(0, math.min(1, elapsed))
 end
 
 local function tick()
   local time = now()
   for buf, state in pairs(drafts) do
-    local elapsed = (time - state.started) / math.max(1, state.deadline - state.started)
-    paint_draft(buf, state, math.max(0, math.min(1, elapsed)))
+    paint_draft(buf, state, progress(state, time))
   end
   for win, state in pairs(views) do
-    local elapsed = (time - state.started) / math.max(1, state.deadline - state.started)
-    paint_view(win, state, math.max(0, math.min(1, elapsed)))
+    paint_view(win, state, progress(state, time))
   end
   if not next(drafts) and not next(views) then
     stop_timer()
@@ -193,8 +204,8 @@ function M.reveal(buf, lines, line, frame)
     frame(line, #lines[line], true)
     return
   end
-  local old = table.concat(slice(before, first, old_end), "\n")
-  local new = table.concat(slice(lines, first, new_end), "\n")
+  local old = table.concat(vim.list_slice(before, first, old_end), "\n")
+  local new = table.concat(vim.list_slice(lines, first, new_end), "\n")
   local common = 0
   while common < #old and common < #new and old:byte(common + 1) == new:byte(common + 1) do
     common = common + 1
@@ -214,10 +225,10 @@ function M.reveal(buf, lines, line, frame)
   local time = now()
   local previous = drafts[buf]
   local state = {
-    before = before,
-    lines = lines,
     first = first,
-    old_end = old_end,
+    count = old_end - first + 1, -- rows the changed region occupies in the buffer
+    after = #before - old_end, -- untouched rows below it
+    body = vim.list_slice(lines, first, new_end),
     prefix = new:sub(1, common),
     added = new:sub(common + 1, #new - tail),
     suffix = tail > 0 and new:sub(#new - tail + 1) or "",

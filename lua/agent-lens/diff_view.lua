@@ -15,7 +15,6 @@ local M = {}
 ---@field view table
 local session
 local serial = 0
-local guard = false
 local ns = vim.api.nvim_create_namespace("agent_lens_review")
 local function notify(message)
   vim.notify("[agent-lens] " .. message, vim.log.levels.INFO)
@@ -67,8 +66,8 @@ function M.close(restore)
     return
   end
   local s = session
+  -- Clearing first makes the WinClosed handler ignore our own closes.
   session = nil
-  guard = true
   for i = #s.windows, 1, -1 do
     local w = s.windows[i]
     if owned(w) and #vim.api.nvim_list_wins() > 1 then
@@ -79,7 +78,6 @@ function M.close(restore)
   if restore ~= false then
     return_to(s.origin)
   end
-  guard = false
 end
 local function identify(s, buf, side)
   local name = "agent-lens://review/" .. s.id .. "/" .. side .. "/" .. s.path
@@ -93,9 +91,6 @@ local function identify(s, buf, side)
 end
 local function scratch(s, side, contents)
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden = "hide"
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].modeline = false
   vim.bo[buf].undolevels = -1
   identify(s, buf, side)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, contents)
@@ -244,9 +239,12 @@ local function prepare(entry, opts)
   end
   return root, comparison, snapshot
 end
-local function new_session(root, path, comparison, o, mode)
+--- Replace any review with a new session that returns to the original origin.
+local function new_session(root, path, comparison, mode)
+  local o = session and session.origin or origin()
+  M.close(false)
   serial = serial + 1
-  return {
+  session = {
     id = serial,
     root = root,
     path = path,
@@ -257,6 +255,11 @@ local function new_session(root, path, comparison, o, mode)
     windows = {},
     buffers = {},
   }
+  return session
+end
+local function show(path, comparison, snapshot)
+  session.path, session.fd, session.hunk = path, comparison, 1
+  draw(snapshot)
 end
 --- Preview the first current hunk in a bounded unified float.
 ---@param entry TimelineEntry
@@ -267,10 +270,7 @@ function M.preview(entry, opts)
   if not root then
     return false
   end
-  local o = session and session.origin or origin()
-  M.close(false)
-  session = new_session(root, entry.rel_path, comparison, o, "preview")
-  local s = session
+  local s = new_session(root, entry.rel_path, comparison, "preview")
   local buf = scratch(s, "hunk", {})
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor",
@@ -303,23 +303,16 @@ function M.open(entry, opts)
     and owned(session.windows[1])
     and owned(session.windows[2])
   then
-    session.path = entry.rel_path
-    session.fd = comparison
-    session.hunk = 1
     vim.api.nvim_set_current_win(session.windows[2].win)
-    draw(snapshot)
+    show(entry.rel_path, comparison, snapshot)
     return true
   end
-  local o = session and session.origin or origin()
-  M.close(false)
-  session = new_session(root, entry.rel_path, comparison, o, "full")
-  local s = session
+  local s = new_session(root, entry.rel_path, comparison, "full")
   vim.cmd("tabnew")
   s.tab = vim.api.nvim_get_current_tabpage()
-  local old =
-    scratch(s, "HEAD", snapshot and snapshot.head or diff.head_contents(root, s.path) or {})
-  local new =
-    scratch(s, "disk", snapshot and snapshot.disk or diff.working_contents(root, s.path) or {})
+  -- draw() fills both sides once the layout exists.
+  local old = scratch(s, "HEAD", {})
+  local new = scratch(s, "disk", {})
   local left = vim.api.nvim_get_current_win()
   local empty = vim.api.nvim_get_current_buf()
   vim.api.nvim_win_set_buf(left, old)
@@ -386,10 +379,7 @@ function M.navigate_file(delta)
   for i = index + delta, delta > 0 and #changed_paths or 1, delta > 0 and 1 or -1 do
     local comparison, message = diff.review(session.root, changed_paths[i])
     if comparison then
-      session.path = changed_paths[i]
-      session.fd = comparison
-      session.hunk = 1
-      draw()
+      show(changed_paths[i], comparison)
       return true
     end
     notify(changed_paths[i] .. ": " .. message)
@@ -417,7 +407,7 @@ end
 vim.api.nvim_create_autocmd("WinClosed", {
   group = vim.api.nvim_create_augroup("AgentLensReviewCleanup", { clear = true }),
   callback = function()
-    if guard or not session then
+    if not session then
       return
     end
     local s = session
@@ -426,16 +416,12 @@ vim.api.nvim_create_autocmd("WinClosed", {
         return
       end
       cleanup_buffers(s)
-      local any = false
       for _, w in ipairs(s.windows) do
         if owned(w) then
-          any = true
+          return
         end
       end
-      if not any then
-        session = nil
-        cleanup_buffers(s)
-      end
+      session = nil
     end)
   end,
 })
