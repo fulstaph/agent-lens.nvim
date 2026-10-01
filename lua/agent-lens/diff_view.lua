@@ -371,28 +371,28 @@ function M.navigate_file(delta)
   if not session or session.mode ~= "full" then
     return false
   end
-  local paths, err = diff.changed_files(session.root)
+  local changed_paths, err = diff.changed_files(session.root)
   if err then
     notify(err)
     return false
   end
-  local index = delta > 0 and 0 or #paths + 1
-  for i, path in ipairs(paths) do
+  local index = delta > 0 and 0 or #changed_paths + 1
+  for i, path in ipairs(changed_paths) do
     if path == session.path then
       index = i
       break
     end
   end
-  for i = index + delta, delta > 0 and #paths or 1, delta > 0 and 1 or -1 do
-    local comparison, message = diff.review(session.root, paths[i])
+  for i = index + delta, delta > 0 and #changed_paths or 1, delta > 0 and 1 or -1 do
+    local comparison, message = diff.review(session.root, changed_paths[i])
     if comparison then
-      session.path = paths[i]
+      session.path = changed_paths[i]
       session.fd = comparison
       session.hunk = 1
       draw()
       return true
     end
-    notify(paths[i] .. ": " .. message)
+    notify(changed_paths[i] .. ": " .. message)
   end
   notify("No more current changes")
   return false
